@@ -66,17 +66,35 @@ export default function SignUpPage({ onSignUp, onSignIn, onBack }: SignUpPagePro
             <p><strong>{createdAccountEmail}</strong></p>
             <p>{t("Email verification is not configured on this server yet. You can sign in now.")}</p>
             <button type="button" className="button button-primary auth-submit" onClick={onSignIn}>{t("Continue to sign in")}</button>
-          </div> : <form onSubmit={(event) => void submit(event)} className="auth-form grid grid-cols-2 w-full gap-4">
+          </div> :
+          
+          <form onSubmit={(event) => void submit(event)} className="auth-form grid lg:grid-cols-2 grid-cols-1 w-full gap-2">
             <label>{t("Full name")}<div className="auth-input-wrap"><User size={16} /><input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder={t("Your name")} required /></div></label>
-            <label>{t("Email")}<div className="auth-input-wrap"><Mail size={16} /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></div></label>
-            <label>{t("Password")}<div className="auth-input-wrap"><Lock size={16} /><input type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("At least 8 characters")} minLength={8} required /><button type="button" aria-label={showPassword ? t("Hide password") : t("Show password")} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small className="auth-hint">{t("Must be at least 8 characters")}</small></label>
-            <label>{t("Confirm password")}<div className="auth-input-wrap"><Lock size={16} /><input type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder={t("Repeat your password")} required /><button type="button" aria-label={showConfirmPassword ? t("Hide confirmation password") : t("Show confirmation password")} onClick={() => setShowConfirmPassword((value) => !value)}>{showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>
+            <label>{t("Email")}
+              
+              
+              <div className="auth-input-wrap">
+                <Mail size={16} />
+              <input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required /></div></label>
+            <label>{t("Password")}
+              <div className="auth-input-wrap">
+              <Lock size={16} />
+            
+            <input type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("At least 8 characters")} minLength={8} required /><button type="button" aria-label={showPassword ? t("Hide password") : t("Show password")} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div>
+          
+            </label>
+
+            <label>{t("Confirm password")}
+              <div className="auth-input-wrap">
+              <Lock size={16} />
+              <input type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder={t("Repeat your password")} required /><button type="button" aria-label={showConfirmPassword ? t("Hide confirmation password") : t("Show confirmation password")} onClick={() => setShowConfirmPassword((value) => !value)}>{showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>
+             <small className="auth-hint">{t("Must be at least 8 characters")}</small>
             <button className="button button-primary auth-submit" disabled={loading}>{loading ? t("Creating account...") : t("Create account")}</button>
           </form>}
           {!verificationEmail && !createdAccountEmail && <p className="auth-switch">{t("Already have an account?")} <button type="button" onClick={onSignIn}>{t("Sign in")}</button></p>}
         </div>
       </section>
-      <div className="auth-artwork"><img src="/1.jpg" alt="" /></div>
+      <div className="auth-artwork h-full object-cover min-h-screen"><img src="/1.jpg" alt="" /></div>
     </main>
   );
 }
