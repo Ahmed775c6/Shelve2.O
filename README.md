@@ -28,7 +28,7 @@ Windows). They can fire while Shelve is closed; the desktop session must be
 available to display the notification. Cloud plans remain on the API, but
 reminder delivery is local and does not use server notifications.
 
-See [Go_Api/README.md](../Go_Api/README.md) for API configuration and routes.
+See [Go_Api/README.md](https://github.com/Ahmed775c6/shelve2.O_Api) for API configuration and routes.
 Set `VITE_API_BASE_URL` to the Go API origin when it is not
 `http://localhost:8080`; configure the API's `CORS_ORIGINS` for the Web app's
 origin.
