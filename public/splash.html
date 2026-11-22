@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0B0C0E" />
+    <title>Shelve — Loading</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #0B0C0E;
+        color: #E5C07B;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      .titlebar {
+        position: fixed;
+        inset: 0 0 auto;
+        display: flex;
+        height: 40px;
+        align-items: center;
+        border-bottom: 1px solid rgba(255,255,255,.1);
+        user-select: none;
+      }
+      .brand { display: flex; align-items: center; gap: 8px; padding-left: 13px; font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+      .brand img { width: 17px; height: 17px; object-fit: contain; }
+      .logo { width: 78px; height: 78px; margin-top: 40px; object-fit: contain; }
+      p { margin: 15px 0 0; color: #F3F4F6; font-size: 14px; }
+      .loader { width: 90px; height: 2px; margin-top: 21px; overflow: hidden; background: rgba(255,255,255,.1); }
+      .loader::after { display: block; width: 35%; height: 100%; background: #E5C07B; content: ""; animation: loading 1.15s ease-in-out infinite; }
+      @keyframes loading { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
+    </style>
+  </head>
+  <body>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="brand" data-tauri-drag-region><img src="/icon.png" alt="" />Shelve</div>
+    </header>
+    <img class="logo" src="/icon.png" alt="Shelve" />
+    <p>Just a sec ...</p>
+    <span class="loader" aria-label="Loading"></span>
+  </body>
+</html>
