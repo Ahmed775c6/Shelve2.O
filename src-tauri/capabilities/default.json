@@ -19,6 +19,27 @@
     "core:webview:allow-get-all-webviews",
     "fs:default",
     "fs:allow-app-read-recursive",
-    "fs:allow-app-write-recursive"
+    "fs:allow-app-write-recursive",
+    "dialog:allow-open",
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "$DOCUMENT/ShelveStudio" }, { "path": "$DOCUMENT/ShelveStudio/**" }]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "$DOCUMENT/ShelveStudio" }, { "path": "$DOCUMENT/ShelveStudio/**" }]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "$DOCUMENT/ShelveStudio" }, { "path": "$DOCUMENT/ShelveStudio/**" }]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$DOCUMENT/ShelveStudio" }, { "path": "$DOCUMENT/ShelveStudio/**" }]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "$DOCUMENT/ShelveStudio" }, { "path": "$DOCUMENT/ShelveStudio/**" }]
+    }
   ]
 }

@@ -44,10 +44,6 @@ export default function AddBookDialog({ onClose, onSave, standalone = false }: A
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (file && file.size > 50 * 1024 * 1024) {
-      setError(t("Book files must be 50 MB or smaller."));
-      return;
-    }
     setSaving(true);
     setError("");
     const book: Book = {
@@ -80,7 +76,7 @@ export default function AddBookDialog({ onClose, onSave, standalone = false }: A
   };
 
   return (
-    <div className={standalone ? "upload-book-page-dialog" : "dialog-backdrop"} role="presentation" onMouseDown={(event) => {
+    <div className={standalone ? "upload-book-page-dialog " : "dialog-backdrop" } role="presentation" onMouseDown={(event) => {
       if (!standalone && event.target === event.currentTarget) onClose();
     }}>
       <section className={`dialog add-book-dialog ${standalone ? "add-book-standalone" : ""}`} role="dialog" aria-modal={!standalone} aria-labelledby="add-book-title">
@@ -111,7 +107,7 @@ export default function AddBookDialog({ onClose, onSave, standalone = false }: A
             <input type="file" accept=".pdf,.epub,.mobi" onChange={(event) => setFile(event.target.files?.[0])} />
             <UploadCloud size={21} />
             <strong>{file?.name ?? t("Choose a book file")}</strong>
-            <span>{t("PDF, ePub or MOBI · up to 50 MB · optional")}</span>
+            <span>{t("PDF, ePub or MOBI · optional")}</span>
           </label>
           <div className="form-grid">
             <label>{t("Title")}<input required value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("Book title")} autoFocus /></label>
@@ -119,7 +115,7 @@ export default function AddBookDialog({ onClose, onSave, standalone = false }: A
             <CategoryCombobox label={t("Category")} value={category} onChange={setCategory} placeholder={t("Choose or type a category")} />
             <label>{t("Total pages")}<input type="number" min="0" value={pages} onChange={(event) => setPages(event.target.value)} placeholder={t("Optional")} /></label>
           </div>
-          <label className="form-label">{t("Description")}<textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t("A short note about this book")} /></label>
+          <label className="form-label">{t("Description")}<textarea rows={3}  className = "h-30" value={description} onChange={(event) => setDescription(event.target.value)} placeholder={t("A short note about this book")} /></label>
           {error && <ErrorAlert className="form-error" message={error} />}
           <footer className="dialog-footer">
             <button type="button" className="button button-outline" onClick={onClose}>{t("Cancel")}</button>

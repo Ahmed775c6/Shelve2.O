@@ -5,6 +5,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import styles from "./PdfReader.module.css";
 import { matchesShortcut } from "../../lib/keyboard-shortcuts";
+import { useLanguage } from "../language-provider";
 
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -34,6 +35,7 @@ export default function PdfReader({
   onDocumentLoad,
   onSpreadSizeChange,
 }: PdfReaderProps) {
+  const { t } = useLanguage();
   const readerRef = useRef<HTMLDivElement>(null);
   const touchStartY = useRef<number | null>(null);
   const lastTurnAt = useRef(0);
@@ -145,7 +147,7 @@ export default function PdfReader({
       }}
       role="region"
       tabIndex={0}
-      aria-label="PDF reader. Scroll or swipe vertically to turn pages."
+      aria-label={t("PDF reader. Scroll or swipe vertically to turn pages.")}
     >
       {loadError ? (
         <div className={styles.message} role="alert">{loadError}</div>
@@ -155,9 +157,9 @@ export default function PdfReader({
           onLoadSuccess={handleDocumentLoad}
           onLoadError={(error) => {
             console.error("Error loading PDF:", error);
-            setLoadError("Unable to load this PDF. Check your connection or open the file directly.");
+            setLoadError(t("Unable to load this PDF. Check your connection or open the file directly."));
           }}
-          loading={<div className={styles.message}>Loading PDF...</div>}
+          loading={<div className={styles.message}>{t("Loading PDF...")}</div>}
         >
           {pageCount > 0 && (
             <div
@@ -180,7 +182,7 @@ export default function PdfReader({
                 }}
                 renderTextLayer
                 renderAnnotationLayer
-                loading={<div className={styles.message}>Rendering page...</div>}
+                loading={<div className={styles.message}>{t("Rendering page...")}</div>}
               />
               {pagesPerSpread === 2 && pageIndex + 1 < pageCount && (
                 <Page
@@ -189,7 +191,7 @@ export default function PdfReader({
                   scale={pageScale}
                   renderTextLayer
                   renderAnnotationLayer
-                  loading={<div className={styles.message}>Rendering page...</div>}
+                  loading={<div className={styles.message}>{t("Rendering page...")}</div>}
                 />
               )}
             </div>

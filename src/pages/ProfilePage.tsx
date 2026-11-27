@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { Camera, Cloud, Eye, EyeOff, Lock, LogOut, Mail, ShieldCheck, UserRound } from "lucide-react";
 import type { AuthUser, StorageMode } from "../types";
 import { useLanguage } from "../components/language-provider";
@@ -11,8 +11,11 @@ interface ProfilePageProps {
   token: string | null;
   avatar: string | null;
   sessionExpiresAt?: string;
+  rememberMe: boolean;
   storageMode: StorageMode;
   onAvatarChange: (avatar: string | null) => Promise<void>;
+  onProfileChange: (profile: { name: string; age: number | null; gender: string; country: string }, password: string) => Promise<void>;
+  onSessionPreferenceChange: (rememberMe: boolean, password: string) => Promise<void>;
   onSignIn: () => void;
   onSignOut: () => Promise<void>;
 }
@@ -48,8 +51,11 @@ export default function ProfilePage({
   token,
   avatar,
   sessionExpiresAt,
+  rememberMe,
   storageMode,
   onAvatarChange,
+  onProfileChange,
+  onSessionPreferenceChange,
   onSignIn,
   onSignOut,
 }: ProfilePageProps) {
@@ -63,7 +69,79 @@ export default function ProfilePage({
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [profileName, setProfileName] = useState(user?.name ?? "");
+  const [profileAge, setProfileAge] = useState(user?.age == null ? "" : String(user.age));
+  const [profileGender, setProfileGender] = useState(user?.gender ?? "");
+  const [profileCountry, setProfileCountry] = useState(user?.country ?? "");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [sessionRememberMe, setSessionRememberMe] = useState(rememberMe);
+  const [sessionPassword, setSessionPassword] = useState("");
+  const [sessionBusy, setSessionBusy] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setProfileName(user?.name ?? "");
+    setProfileAge(user?.age == null ? "" : String(user.age));
+    setProfileGender(user?.gender ?? "");
+    setProfileCountry(user?.country ?? "");
+    setSessionRememberMe(rememberMe);
+  }, [rememberMe, user?.id, user?.name, user?.age, user?.gender, user?.country]);
+
+  const completedProfileFields = [
+    profileName.trim(),
+    user?.email,
+    avatar,
+    profileAge,
+    profileGender,
+    profileCountry.trim(),
+  ].filter(Boolean).length;
+  const profileCompletion = Math.round(completedProfileFields / 6 * 100);
+
+  const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (!token || !profileName.trim() || !profilePassword) {
+      setError(t("Enter a name and confirm it with your password."));
+      return;
+    }
+    setProfileBusy(true);
+    try {
+      await onProfileChange({
+        name: profileName.trim(),
+        age: profileAge ? Number(profileAge) : null,
+        gender: profileGender,
+        country: profileCountry.trim(),
+      }, profilePassword);
+      setProfilePassword("");
+      setNotice(t("Profile updated."));
+    } catch (profileError) {
+      setError(t(profileError instanceof Error ? profileError.message : "Could not update your profile."));
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const saveSessionPreference = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    if (!token || !sessionPassword) {
+      setError(t("Enter your password to change this session setting."));
+      return;
+    }
+    setSessionBusy(true);
+    try {
+      await onSessionPreferenceChange(sessionRememberMe, sessionPassword);
+      setSessionPassword("");
+      setNotice(t("Session preference updated."));
+    } catch (sessionError) {
+      setError(t(sessionError instanceof Error ? sessionError.message : "Could not update the session preference."));
+    } finally {
+      setSessionBusy(false);
+    }
+  };
 
   const changePassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -139,14 +217,16 @@ export default function ProfilePage({
       setBusy(false);
     }
   };
-
+const [Edit, setEdit] = useState(false);
   return (
     <div className="page-shell">
       <SectionTitle eyebrow={t("ACCOUNT SETTINGS")} title={t("Profile")} detail={t("Manage your Shelve account and sign-in session.")} />
-      <section className="profile-card">
+    <div className="grid grid-cols-1 lg:grid-cols-2 w-full gap-3">
+
+        <section className="profile-card">
         <div className="profile-card-heading">
           <div className="profile-avatar profile-page-avatar">
-            {avatar ? <img src={avatar} alt="" /> : <UserRound size={22} />}
+            {avatar ? <img src={avatar} className="h-12.5" alt="avatar" /> : <UserRound size={22} />}
           </div>
           <div className="profile-card-identity">
             <h2>{user?.name || t("Local reader")}</h2>
@@ -157,10 +237,50 @@ export default function ProfilePage({
               </button>
               {avatar && <button type="button" className="button button-outline" disabled={avatarBusy} onClick={() => void removeAvatar()}>{t("Remove photo")}</button>}
               <input ref={avatarInputRef} type="file" accept="image/*" hidden onChange={(event) => void changeAvatar(event)} />
+           <button type = "button" className = "button button-outline"
+          onClick={() => {
+            setEdit(!Edit)
+          }}>
+            {
+        <>
+           {!Edit ? t("Edit") : t("Cancel")}
+        </>
+
+            }
+          </button>
             </div>
+
             <p className="profile-photo-note">{t("Profile photos are saved on this device.")}</p>
           </div>
+
         </div>
+        {user && token && <>
+          <div className="profile-completion">
+            <div><strong>{t("Profile completion")}</strong><span>{profileCompletion}%</span></div>
+            <progress value={profileCompletion} max={100} aria-label={`${t("Profile completion")} ${profileCompletion}%`} />
+            <small>{profileCompletion === 100 ? t("Your profile is complete.") : t("Add optional details to complete your profile.")}</small>
+          </div>
+      {
+
+        Edit ?     <form className="profile-demographics-form" onSubmit={(event) => void saveProfile(event)}>
+          <label>{t("Display name")}<input type="text" value={profileName} onChange={(event) => setProfileName(event.target.value)} maxLength={100} required /></label>
+          <label>{t("Age")}<input type="number" min={1} max={120} inputMode="numeric" value={profileAge} onChange={(event) => setProfileAge(event.target.value)} placeholder={t("Optional")} /></label>
+          <label>{t("Gender")}<select value={profileGender} onChange={(event) => setProfileGender(event.target.value)}>
+            <option value="">{t("Select an option")}</option>
+            <option value="woman">{t("Woman")}</option>
+            <option value="man">{t("Man")}</option>
+            <option value="non-binary">{t("Non-binary")}</option>
+            <option value="self-described">{t("Self-described")}</option>
+            <option value="prefer-not-to-say">{t("Prefer not to say")}</option>
+          </select></label>
+          <label>{t("Country")}<input type="text" value={profileCountry} onChange={(event) => setProfileCountry(event.target.value)} maxLength={80} placeholder={t("Optional")} /></label>
+          <label>{t("Confirm with password")}<input type="password" autoComplete="current-password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} required /></label>
+          <button type="submit" className="button button-outline" disabled={profileBusy || !profileName.trim() || !profilePassword}>{profileBusy ? t("Saving…") : t("Save profile")}</button>
+        </form> : null
+      }
+       </>
+
+        }
         <div className="profile-details">
           <div className="profile-detail">
             <span><UserRound size={14} /> {t("Name")}</span>
@@ -170,6 +290,11 @@ export default function ProfilePage({
             <span><Mail size={14} /> {t("Email")}</span>
             <strong>{user?.email || t("Not connected")}</strong>
           </div>
+          {user && <>
+            <div className="profile-detail"><span>{t("Age")}</span><strong>{user.age ?? t("Not provided")}</strong></div>
+            <div className="profile-detail"><span>{t("Gender")}</span><strong>{user.gender ? t(user.gender) : t("Not provided")}</strong></div>
+            <div className="profile-detail"><span>{t("Country")}</span><strong>{user.country || t("Not provided")}</strong></div>
+          </>}
           <div className="profile-detail">
             <span><Cloud size={14} /> {t("Storage")}</span>
             <strong>{storageMode === "cloud" ? t("Cloud online") : t("Offline on this device")}</strong>
@@ -178,6 +303,12 @@ export default function ProfilePage({
             <div className="profile-detail">
               <span>{t("Session expires")}</span>
               <strong>{formatExpiry(sessionExpiresAt, locale, t)}</strong>
+            </div>
+          )}
+          {user && (
+            <div className="profile-detail">
+              <span>{t("Remember me")}</span>
+              <strong>{rememberMe ? t("On — 30 days") : t("Off — 24 hours")}</strong>
             </div>
           )}
         </div>
@@ -191,7 +322,27 @@ export default function ProfilePage({
             : <button className="button button-outline" onClick={onSignIn}>{t("Sign in")}</button>}
         </div>
       </section>
-      {user && token && (
+      <section className="flex flex-col gap-3 ">
+       {user && token && (
+        <section className="security-card h-fit">
+          <div className="security-card-heading">
+            <div className="security-card-icon"><ShieldCheck size={18} /></div>
+            <div>
+              <h2>{t("Sign-in session")}</h2>
+              <p>{t("Remember me keeps this session active for 30 days. Otherwise it expires after 24 hours.")}</p>
+            </div>
+          </div>
+          <form className="session-preference-form" onSubmit={(event) => void saveSessionPreference(event)}>
+            <label className="session-preference-toggle">
+              <input type="checkbox" checked={sessionRememberMe} onChange={(event) => setSessionRememberMe(event.target.checked)} />
+              <span>{t("Remember me for 30 days")}</span>
+            </label>
+            <label>{t("Confirm with password")}<input type="password" autoComplete="current-password" value={sessionPassword} onChange={(event) => setSessionPassword(event.target.value)} required /></label>
+            <button type="submit" className="button button-primary" disabled={sessionBusy || !sessionPassword || sessionRememberMe === rememberMe}>{sessionBusy ? t("Saving…") : t("Save session setting")}</button>
+          </form>
+        </section>
+      )}
+           {user && token && (
         <section className="security-card">
           <div className="security-card-heading">
             <div className="security-card-icon"><ShieldCheck size={18} /></div>
@@ -231,6 +382,9 @@ export default function ProfilePage({
           </form>
         </section>
       )}
+      </section>
+    </div>
+
       {error && <ErrorAlert className="form-error settings-message" message={error} />}
       {notice && <p className="profile-photo-notice" role="status">{notice}</p>}
     </div>

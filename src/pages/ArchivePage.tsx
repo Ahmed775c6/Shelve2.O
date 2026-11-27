@@ -331,7 +331,7 @@ export default function ArchivePage({ books, onOpenBook, onReadBook, onUpdateBoo
 
   return (
     <div className="page-shell archive-page">
-      <SectionTitle eyebrow="STORIES WELL SPENT" title="Finished books" detail={countDetail} />
+      <SectionTitle eyebrow={t("STORIES WELL SPENT")} title={t("Finished books")} detail={countDetail} />
 
       <section className="archive-milestones" aria-label={t("Completion milestones")}>
         <article className="archive-milestone">

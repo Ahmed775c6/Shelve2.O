@@ -37,20 +37,23 @@ import {
   ReadingPage,
   ReadingPlannerPage,
   RecommendationsPage,
+  ResetPasswordPage,
   SettingsPage,
   WritePage,
   WritingGoalsPage,
   WritingCoverPage,
   WritingAnalyticsPage,
+  NotificationsPage,
+  FeedbackPage,
 } from "./pages";
-import { resendVerificationEmail, signInOnline, signOutOnline, signUpOnline, syncOfflineDataToCloud, uploadBookAssets } from "./lib/cloud";
+import { deleteAccountOnline, resendVerificationEmail, signInOnline, signOutOnline, signUpOnline, syncOfflineDataToCloud, updateProfileOnline, updateSessionPreferenceOnline, uploadBookAssets, verifyAccountPasswordOnline } from "./lib/cloud";
 import { ApiError, apiRequest, uploadApiFile } from "./lib/api";
 import { openAuxiliaryWindow, toggleAuxiliaryWindow } from "./lib/windows";
 import { matchesShortcut } from "./lib/keyboard-shortcuts";
-import { openStudioPage } from "./studio/logic/routes";
 import { getSyncHealth, syncEngine } from "./lib/sync/SyncEngine";
 import {
   exportBackup,
+  clearAuthSession,
   configureStorage,
   deleteBookRecord,
   deleteLocalData as clearLocalData,
@@ -80,6 +83,7 @@ const viewPaths: Record<AppView, string> = {
   overview: "/overview",
   onboarding: "/onboarding",
   signin: "/signin",
+  "reset-password": "/reset-password",
   signup: "/signup",
   library: "/library",
   reading: "/reading",
@@ -92,6 +96,8 @@ const viewPaths: Record<AppView, string> = {
   upload: "/upload",
   settings: "/settings",
   profile: "/profile",
+  notifications: "/notifications",
+  feedback: "/feedback",
   planner: "/planner",
   "edit-book": "/library",
   details: "/library",
@@ -115,6 +121,7 @@ function viewForPath(pathname: string): AppView {
   const pathViews: Record<string, AppView> = {
     onboarding: "onboarding",
     signin: "signin",
+    "reset-password": "reset-password",
     signup: "signup",
     overview: "overview",
     library: "library",
@@ -128,6 +135,8 @@ function viewForPath(pathname: string): AppView {
     upload: "upload",
     settings: "settings",
     profile: "profile",
+    notifications: "notifications",
+    feedback: "feedback",
     planner: "planner",
   };
   return pathViews[segments[0] ?? "overview"] ?? "overview";
@@ -149,6 +158,8 @@ function App() {
   const [writing, setWriting] = useState("");
   const [storageMode, setStorageMode] = useState<StorageMode>("offline");
   const [authSession, setAuthSession] = useState<AuthSession | null>(null);
+  const authSessionRef = useRef<AuthSession | null>(null);
+  authSessionRef.current = authSession;
   const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [startupError, setStartupError] = useState("");
@@ -221,9 +232,9 @@ function App() {
       if (windowKind) window.location.hash = "#/writings";
       else navigate("/writings");
     },
-    onOpenCoverDesigner: () => windowKind ? openStudioPage("/writings/cover") : navigate("/writings/cover"),
-    onOpenGoalsPage: () => windowKind ? openStudioPage("/writings/goals") : navigate("/writings/goals"),
-    onOpenAnalyticsPage: () => windowKind ? openStudioPage("/writings/analytics") : navigate("/writings/analytics"),
+    onOpenCoverDesigner: () => windowKind ? window.location.hash = "#/writings/cover" : navigate("/writings/cover"),
+    onOpenGoalsPage: () => windowKind ? window.location.hash = "#/writings/goals" : navigate("/writings/goals"),
+    onOpenAnalyticsPage: () => windowKind ? window.location.hash = "#/writings/analytics" : navigate("/writings/analytics"),
     onNewProject: (formatType) => studioTitlebarActions.current?.onNewProject(formatType),
     onOpenProjectPicker: () => studioTitlebarActions.current?.onOpenProjectPicker(),
     onSelectRecentProject: (projectId) => studioTitlebarActions.current?.onSelectRecentProject(projectId),
@@ -247,10 +258,22 @@ function App() {
       configureReporter(null);
       return;
     }
-    configureReporter(async (message) => {
+    configureReporter(async (message, screenshots) => {
+      const form = new FormData();
+      form.set("title", "Runtime application error");
+      form.set("message", Array.from(message).slice(0, 4000).join(""));
+      form.set("screen", "runtime-error");
+      form.set("metadata", JSON.stringify({
+        platform: navigator.platform,
+        userAgent: navigator.userAgent.slice(0, 512),
+        route: window.location.pathname,
+        appView: viewRef.current,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      }));
+      screenshots.forEach((file) => form.append("screenshots", file, file.name));
       await apiRequest("/api/error-reports", {
         method: "POST",
-        body: JSON.stringify({ message: Array.from(message).slice(0, 1000).join(""), screen: viewRef.current }),
+        body: form,
       }, authSession.token);
     });
     return () => configureReporter(null);
@@ -449,7 +472,7 @@ function App() {
         setProfileAvatar(savedProfileAvatar);
         setStorageMode(effectiveMode);
         setAuthSession(session);
-        const isAuthRoute = ["/onboarding", "/signin", "/signup", "/verify-email"].includes(location.pathname);
+        const isAuthRoute = ["/onboarding", "/signin", "/signup", "/verify-email", "/reset-password"].includes(location.pathname);
         if (location.pathname === "/" || (effectiveMode === "cloud" && !session && !isAuthRoute)) {
           const initialView: AppView = mode === null && !session ? "onboarding" : effectiveMode === "cloud" && !session ? "signin" : "overview";
           navigate(routeForView(initialView), { replace: true });
@@ -519,6 +542,90 @@ function App() {
     }
     return syncEngine.start(authSession.token, (token) => syncOfflineDataToCloud(token, true));
   }, [initialized, windowKind, storageMode, authSession?.token]);
+
+  useEffect(() => {
+    if (!initialized || !authSession?.token) return;
+    const expiresAt = Date.parse(authSession.expiresAt);
+    if (!Number.isFinite(expiresAt)) return;
+    let warningShown = false;
+    let expirationStarted = false;
+
+    const expireSession = async () => {
+      if (expirationStarted) return;
+      expirationStarted = true;
+      try {
+        await syncEngine.stopAndWait();
+      } catch (error) {
+        console.error("Could not stop cloud sync after session expiry:", error);
+      }
+      if (authSessionRef.current?.token !== authSession.token) return;
+      try {
+        await clearAuthSession();
+      } catch (error) {
+        console.error("Could not clear the expired session:", error);
+      }
+      setAuthSession(null);
+      setAuthReturnView("settings");
+      setAuthWarning("Your session expired. Please sign in again.");
+      if (isTauri()) {
+        configureStorage("offline", null);
+        setStorageMode("offline");
+        try {
+          await saveStorageMode("offline");
+        } catch (error) {
+          console.error("Could not save offline mode after session expiry:", error);
+          showAppMessage(error instanceof Error ? error.message : "Could not save offline storage mode.", true);
+        }
+        try {
+          const [localBooks, localWriting] = await Promise.all([
+            loadBooks(),
+            loadText(storageKeys.writing, ""),
+          ]);
+          setBooks(localBooks);
+          setWriting(localWriting);
+        } catch (error) {
+          console.error("Could not load the local library after session expiry:", error);
+          showAppMessage(error instanceof Error ? error.message : "Could not load the local library.", true);
+        }
+      } else {
+        configureStorage("cloud", null);
+        setBooks([]);
+        setWriting("");
+      }
+      const signInNow = await confirm({
+        title: t("Session expired"),
+        message: t("Your session expired. Sign in again to continue."),
+        confirmLabel: t("Sign in"),
+      });
+      if (signInNow) setView("signin");
+    };
+
+    const checkSession = () => {
+      const remaining = expiresAt - Date.now();
+      if (remaining <= 0) {
+        void expireSession();
+        return;
+      }
+      if (!warningShown && remaining <= 60 * 60 * 1000) {
+        warningShown = true;
+        void confirm({
+          title: t("Session expires in one hour"),
+          message: t("Your session expires in one hour. Turn on Remember me in Profile to stay signed in for 30 days, or sign in again."),
+          confirmLabel: t("Open profile"),
+        }).then((openProfile) => {
+          if (openProfile) setView("profile");
+        });
+      }
+    };
+
+    checkSession();
+    const interval = window.setInterval(checkSession, 15_000);
+    document.addEventListener("visibilitychange", checkSession);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", checkSession);
+    };
+  }, [initialized, authSession?.token, authSession?.expiresAt, confirm, t]);
 
   useEffect(() => {
     if (!initialized || !isTauri()) return;
@@ -765,9 +872,14 @@ function App() {
     setView("library");
   };
 
-  const addSuggestedBook = (book: Book) => {
+  const addSuggestedBook = async (book: Book, file?: File, cover?: File) => {
     if (books.some((item) => item.title === book.title)) return;
-    setBooks((current) => [{ ...book, updatedAt: new Date().toISOString() }, ...current]);
+    try {
+      await addBook({ ...book, updatedAt: new Date().toISOString() }, file, cover);
+    } catch (error) {
+      console.error("Could not add a public book to the library:", error);
+      showAppMessage(error instanceof Error ? error.message : "Could not add that book to your library.", true);
+    }
   };
 
   const exportLibrary = async () => {
@@ -814,47 +926,45 @@ function App() {
     });
   };
 
-  const changeStorageMode = async (mode: StorageMode) => {
+  const changeStorageMode = async (
+    mode: StorageMode,
+    source?: "local" | "cloud",
+    password?: string,
+  ) => {
     if (mode === "offline" && !isTauri()) {
       showAppMessage("Offline mode is available only in the Shelve desktop app.", true);
       return;
     }
-    if (mode !== storageMode && !(await confirmUnsyncedWork(t("Switching storage mode")))) return;
-    if (mode === "cloud" && !authSession) {
-      await saveStorageMode(mode);
-      configureStorage(mode, null);
-      setStorageMode(mode);
+    if (mode === storageMode) return;
+    if (!authSession) {
       setAuthReturnView("settings");
       setView("signin");
       return;
     }
-    if (mode === "cloud" && authSession) {
-      try {
+    if (!source) throw new Error("Choose whether to keep the local or cloud library.");
+    if (!password) throw new Error("Enter your password to confirm the storage replacement.");
+
+    await syncEngine.stopAndWait();
+    try {
+      if (source === "local") {
+        await syncOfflineDataToCloud(authSession.token, true, password);
+      } else {
+        if (!isTauri()) throw new Error("Replacing local data requires the Shelve desktop app.");
+        await verifyAccountPasswordOnline(authSession.token, password);
+        await clearLocalData("library");
         await syncOfflineDataToCloud(authSession.token, true);
-        await saveStorageMode(mode);
-        configureStorage(mode, authSession.token);
-        setStorageMode(mode);
-        setBooks(await loadBooks());
-        setWriting(await loadText(storageKeys.writing, ""));
-        showAppMessage("Your library is synced.");
-      } catch (error) {
-        showAppMessage(error instanceof Error ? `Cloud sync failed: ${error.message}` : "Cloud sync failed.", true);
-      }
-      return;
-    }
-    if (mode === "offline") {
-      if (authSession) {
-        try {
-          await syncOfflineDataToCloud(authSession.token, true);
-        } catch (error) {
-          showAppMessage(error instanceof Error ? `Using the latest local copy; cloud refresh failed: ${error.message}` : "Using the latest local copy; cloud refresh failed.", true);
-        }
       }
       await saveStorageMode(mode);
-      configureStorage(mode, null);
+      configureStorage(mode, mode === "cloud" ? authSession.token : null);
       setStorageMode(mode);
       setBooks(await loadBooks());
       setWriting(await loadText(storageKeys.writing, ""));
+      showAppMessage(source === "local" ? "Cloud data was replaced with this device's library." : "This device now has the cloud library.");
+    } catch (error) {
+      if (storageMode === "cloud" && isTauri()) {
+        syncEngine.start(authSession.token, (token) => syncOfflineDataToCloud(token, true));
+      }
+      throw error;
     }
   };
 
@@ -896,6 +1006,13 @@ function App() {
 
   const completeSignIn = async (session: AuthSession) => {
     await saveAuthSession(session);
+    if (authReturnView === "settings" && storageMode === "offline" && isTauri()) {
+      setAuthSession(session);
+      setAuthWarning("");
+      setView("settings");
+      showAppMessage("Signed in. Choose which library to keep in Storage and sync settings.");
+      return;
+    }
     await saveStorageMode("cloud");
     configureStorage("cloud", session.token);
     setAuthSession(session);
@@ -922,8 +1039,56 @@ function App() {
     }
   };
 
-  const handleSignIn = async (email: string, password: string) => completeSignIn(await signInOnline(email, password));
+  const handleSignIn = async (email: string, password: string, rememberMe: boolean) =>
+    completeSignIn(await signInOnline(email, password, rememberMe));
   const handleSignUp = (name: string, email: string, password: string) => signUpOnline(name, email, password);
+
+  const updateAccountProfile = async (
+    profile: { name: string; age: number | null; gender: string; country: string },
+    password: string,
+  ) => {
+    if (!authSession) throw new Error("Sign in before updating your profile.");
+    const user = await updateProfileOnline(authSession.token, password, profile);
+    const updatedSession = { ...authSession, user };
+    await saveAuthSession(updatedSession);
+    setAuthSession(updatedSession);
+  };
+
+  const updateSessionPreference = async (rememberMe: boolean, password: string) => {
+    if (!authSession) throw new Error("Sign in before updating your session.");
+    const updatedSession = await updateSessionPreferenceOnline(authSession.token, password, rememberMe);
+    await saveAuthSession(updatedSession);
+    if (storageMode === "cloud") configureStorage("cloud", updatedSession.token);
+    setAuthSession(updatedSession);
+    setAuthWarning("");
+    showAppMessage(rememberMe
+      ? "This session will now remain active for 30 days."
+      : "This session will now expire after 24 hours.");
+  };
+
+  const deleteCloudAccount = async (password: string) => {
+    if (!authSession) throw new Error("Sign in before deleting your account.");
+    await syncEngine.stopAndWait();
+    try {
+      await deleteAccountOnline(authSession.token, password);
+    } catch (error) {
+      if (storageMode === "cloud" && isTauri()) {
+        syncEngine.start(authSession.token, (token) => syncOfflineDataToCloud(token, true));
+      }
+      throw error;
+    }
+    if (isTauri()) {
+      await clearLocalData("all");
+    } else {
+      await clearAuthSession();
+      localStorage.clear();
+    }
+    setAuthSession(null);
+    setBooks([]);
+    setWriting("");
+    setProfileAvatar(null);
+    window.location.assign(routeForView("onboarding"));
+  };
 
   const handleSignOut = async () => {
     if (!(await confirmUnsyncedWork(t("Signing out")))) return;
@@ -1068,7 +1233,13 @@ function App() {
           {windowKind === "edit-book" && (selectedBook
             ? <EditBookPage book={selectedBook} onSave={saveEditedBook} onCancel={closeAuxiliaryWindow} />
             : <ErrorAlert className="auxiliary-error" message="This book is not available in your local library." />)}
-          {windowKind === "studio" && <WritePage value={writing} onChange={saveWriting} token={authSession?.token} userId={authSession?.user.id} authorName={authSession?.user.name || authSession?.user.email} storageMode={storageMode} onAddBook={addSuggestedBook} onBeforeWorkspaceChange={() => confirmUnsyncedWork(t("Switching workspaces"))} onStudioToolbarChange={updateStudioTitlebar} />}
+          {windowKind === "studio" && <Routes>
+            <Route path="/writings" element={<WritePage value={writing} onChange={saveWriting} token={authSession?.token} userId={authSession?.user.id} authorName={authSession?.user.name || authSession?.user.email} storageMode={storageMode} onAddBook={addSuggestedBook} onBeforeWorkspaceChange={() => confirmUnsyncedWork(t("Switching workspaces"))} onStudioToolbarChange={updateStudioTitlebar} />} />
+            <Route path="/writings/cover" element={<WritingCoverPage />} />
+            <Route path="/writings/goals" element={<WritingGoalsPage />} />
+            <Route path="/writings/analytics" element={<WritingAnalyticsPage />} />
+            <Route path="*" element={<Navigate to="/writings" replace />} />
+          </Routes>}
           {windowKind === "new-project" && <NewProjectWindow userId={authSession?.user.id || "local"} t={t} />}
           {!["planner", "edit-book", "upload-book", "studio", "new-project"].includes(windowKind) && <ErrorAlert className="auxiliary-error" message="This Shelve window is not recognized." />}
         </main>
@@ -1077,7 +1248,7 @@ function App() {
     );
   }
 
-  if (view === "onboarding" || view === "signin" || view === "signup") {
+  if (view === "onboarding" || view === "signin" || view === "signup" || view === "reset-password") {
     const chooseOffline = async () => {
       try {
         await saveStorageMode("offline");
@@ -1107,6 +1278,7 @@ function App() {
           <Route path="/signin" element={<SignInPage onSignIn={handleSignIn} onResendVerification={resendVerificationEmail} onSignUp={() => setView("signup")} onBack={() => setView(authReturnView)} />} />
           <Route path="/signup" element={<SignUpPage onSignUp={handleSignUp} onSignIn={() => setView("signin")} onBack={() => setView("signin")} />} />
           <Route path="/verify-email" element={<VerifyEmailPage onSignIn={() => setView("signin")} />} />
+          <Route path="/reset-password" element={<ResetPasswordPage onSignIn={() => setView("signin")} />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
         {authWarning
@@ -1151,7 +1323,7 @@ function App() {
       />
       <main className={`main-content ${view === "reader" ? "main-content-reader" : ""} ${collapsed ? "main-content-collapsed" : ""} ${focusMode && view === "reader" ? "reader-focus-mode" : ""}`}>
         {view !== "reader" && <div className="main-toolbar">
-          <div className="breadcrumb"><span>{t("YOUR SPACE")}</span><i>/</i><strong>{view === "details" ? selectedBook?.title ?? t("Book details") : t(({ overview: "Overview", library: "My library", reading: "Reading", archive: "Finished books", analytics: "Analytics", writings: "My writings", "public-library": "Public Library", recommendations: "Recommendations", ask: "Ask about a book", upload: "Upload book", settings: "Settings", profile: "Profile", planner: "Reading plan", reader: "Reading", "edit-book": "Edit book", onboarding: "Welcome to Shelve", signin: "Sign in", signup: "Sign up", details: "Book details" } as Partial<Record<AppView, string>>)[view] ?? view)}</strong></div>
+          <div className="breadcrumb"><span>{t("YOUR SPACE")}</span><i>/</i><strong>{view === "details" ? selectedBook?.title ?? t("Book details") : t(({ overview: "Overview", library: "My library", reading: "Reading", archive: "Finished books", analytics: "Analytics", writings: "My writings", "public-library": "Public Library", recommendations: "Recommendations", ask: "Ask about a book", upload: "Upload book", settings: "Settings", profile: "Profile", notifications: "Notifications", feedback: "Insights & bug reports", planner: "Reading plan", reader: "Reading", "edit-book": "Edit book", onboarding: "Welcome to Shelve", signin: "Sign in", signup: "Sign up", details: "Book details" } as Partial<Record<AppView, string>>)[view] ?? view)}</strong></div>
           <div className="main-toolbar-actions">
            
             <button className="button button-primary toolbar-add" onClick={() => void openUpload()}><Plus size={15} /> {t("Add book")}</button>
@@ -1162,7 +1334,7 @@ function App() {
               onSignIn={() => { setAuthReturnView("profile"); setView("signin"); }}
               onSignOut={handleSignOut}
             />
-           <NotificationCenter appMessage={appMessage} authWarning={authWarning} />
+           <NotificationCenter appMessage={appMessage} authWarning={authWarning} token={authSession?.token} onViewAll={() => setView("notifications")} />
         </div>
         </div>}
         {appMessage && (appMessageError
@@ -1187,11 +1359,13 @@ function App() {
           <Route path="/writings/goals" element={<WritingGoalsPage />} />
           <Route path="/writings/cover" element={<WritingCoverPage />} />
           <Route path="/writings/analytics" element={<WritingAnalyticsPage />} />
-          <Route path="/public-library" element={<PublicLibraryPage books={books} onAdd={addSuggestedBook} />} />
+          <Route path="/public-library" element={<PublicLibraryPage books={books} onAdd={(book, file, cover) => addBook({ ...book, updatedAt: new Date().toISOString() }, file, cover)} />} />
           <Route path="/recommendations" element={<RecommendationsPage onBrowse={() => setView("public-library")} />} />
           <Route path="/ask" element={<AiPage />} />
-          <Route path="/settings" element={<SettingsPage theme={theme} onThemeChange={setTheme} onExport={() => void exportLibrary()} storageMode={storageMode} onStorageModeChange={changeStorageMode} onDeleteLocalData={deleteLocalData} userName={authSession?.user.name || authSession?.user.email} emailNotificationToken={authSession?.token} syncMessage={appMessageError || authWarning ? "" : appMessage} onSignIn={() => { setAuthReturnView("settings"); setView("signin"); }} onProfile={() => setView("profile")} onImport={importLibrary} />} />
-          <Route path="/profile" element={<ProfilePage user={authSession?.user ?? null} token={authSession?.token ?? null} avatar={profileAvatar} sessionExpiresAt={authSession?.expiresAt} storageMode={storageMode} onAvatarChange={updateProfileAvatar} onSignIn={() => { setAuthReturnView("profile"); setView("signin"); }} onSignOut={handleSignOut} />} />
+          <Route path="/settings" element={<SettingsPage theme={theme} onThemeChange={setTheme} onExport={() => void exportLibrary()} storageMode={storageMode} onStorageModeChange={changeStorageMode} onDeleteLocalData={deleteLocalData} onDeleteAccount={deleteCloudAccount} userName={authSession?.user.name || authSession?.user.email} emailNotificationToken={authSession?.token} syncMessage={appMessageError || authWarning ? "" : appMessage} onSignIn={() => { setAuthReturnView("settings"); setView("signin"); }} onProfile={() => setView("profile")} onImport={importLibrary} />} />
+          <Route path="/profile" element={<ProfilePage user={authSession?.user ?? null} token={authSession?.token ?? null} avatar={profileAvatar} sessionExpiresAt={authSession?.expiresAt} rememberMe={authSession?.rememberMe === true} storageMode={storageMode} onAvatarChange={updateProfileAvatar} onProfileChange={updateAccountProfile} onSessionPreferenceChange={updateSessionPreference} onSignIn={() => { setAuthReturnView("profile"); setView("signin"); }} onSignOut={handleSignOut} />} />
+          <Route path="/notifications" element={<NotificationsPage token={authSession?.token ?? null} onSignIn={() => { setAuthReturnView("notifications"); setView("signin"); }} />} />
+          <Route path="/feedback" element={<FeedbackPage token={authSession?.token ?? null} onSignIn={() => { setAuthReturnView("feedback"); setView("signin"); }} />} />
           <Route path="/planner" element={<ReadingPlannerPage books={books} />} />
           <Route path="/upload" element={<UploadBookPage onSave={addBook} onCancel={() => setView("library")} />} />
           <Route path="/books/:bookId/edit" element={selectedBook ? <EditBookPage book={selectedBook} onSave={saveEditedBook} onCancel={() => setView("details")} /> : <Navigate to="/library" replace />} />

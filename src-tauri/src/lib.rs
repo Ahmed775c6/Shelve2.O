@@ -10,6 +10,7 @@ const AUTH_ENTRY: &str = "cloud-session";
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;

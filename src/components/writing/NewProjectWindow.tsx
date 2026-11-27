@@ -2,7 +2,7 @@ import { useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { NewProjectWizard, type NewProjectDraft } from "./NewProjectWizard";
-import { loadRecords, saveRecords, type StoredRecord } from "../../lib/storage";
+import { chooseLocalWritingProjectFolder, createLocalWritingProjectPath, loadRecords, saveRecords, type StoredRecord } from "../../lib/storage";
 import { newProject } from "../../studio/logic/writingProject";
 import { scaffoldWritingProject } from "../../lib/writing-scaffolds";
 import { countProjectWords } from "../../studio/logic/writingDocument";
@@ -16,13 +16,16 @@ interface NewProjectWindowProps {
 export default function NewProjectWindow({ userId, t }: NewProjectWindowProps) {
   const [draft, setDraft] = useState<NewProjectDraft>({
     title: "untitled-story",
+    parentPath: "ShelveStudio",
     formatType: "Book / Novel",
     genre: "Literary Fiction",
     targetWordGoal: "50000",
     starterEnabled: true,
     aiTemplatesEnabled: true,
+    syncOnline: false,
   });
   const [error, setError] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
 
   const closeWindow = () => {
     if (isTauri()) {
@@ -33,6 +36,7 @@ export default function NewProjectWindow({ userId, t }: NewProjectWindowProps) {
   };
 
   const createProject = async () => {
+    if (isCreating) return;
     setError("");
     const target = draft.targetWordGoal.trim() ? Number(draft.targetWordGoal) : null;
     if (target !== null && (!Number.isFinite(target) || target <= 0)) {
@@ -40,6 +44,7 @@ export default function NewProjectWindow({ userId, t }: NewProjectWindowProps) {
       return;
     }
 
+    setIsCreating(true);
     try {
       const existing = await loadRecords<WritingProject & StoredRecord>("writings");
       const project = scaffoldWritingProject(
@@ -47,11 +52,24 @@ export default function NewProjectWindow({ userId, t }: NewProjectWindowProps) {
         draft.formatType,
         { starterEnabled: draft.starterEnabled, aiTemplatesEnabled: draft.aiTemplatesEnabled },
       );
+      project.localPath = await createLocalWritingProjectPath(draft.title, draft.parentPath);
+      project.syncOnline = draft.syncOnline;
       project.wordCount = countProjectWords(project);
       await saveRecords("writings", [project, ...existing] as (WritingProject & StoredRecord)[]);
       closeWindow();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not create the project.");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const chooseProjectLocation = async () => {
+    try {
+      const parentPath = await chooseLocalWritingProjectFolder();
+      if (parentPath) setDraft((current) => ({ ...current, parentPath }));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not choose the local project folder.");
     }
   };
 
@@ -63,7 +81,9 @@ export default function NewProjectWindow({ userId, t }: NewProjectWindowProps) {
           draft={draft}
           onChange={setDraft}
           onCancel={closeWindow}
+          onChooseLocation={() => void chooseProjectLocation()}
           onCreate={() => void createProject()}
+          isCreating={isCreating}
           t={t}
         />
       </div>

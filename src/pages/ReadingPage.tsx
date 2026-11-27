@@ -15,9 +15,9 @@ export default function ReadingPage({ books, onOpenBook, onViewDetails, onAddBoo
   return (
     <div className="page-shell reading-page">
       <SectionTitle
-        eyebrow="YOUR CURRENT CHAPTER"
-        title="Reading now"
-        detail="Pick up right where you left off."
+        eyebrow={t("YOUR CURRENT CHAPTER")}
+        title={t("Reading now")}
+        detail={t("Pick up right where you left off.")}
         action={<button className="button button-outline" onClick={onAddBook}><Plus size={14} /> {t("Add book")}</button>}
       />
       {current.length ? (

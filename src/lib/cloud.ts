@@ -12,18 +12,19 @@ import {
   saveLocalFile,
 } from "./storage";
 
-const SESSION_LENGTH_MS = 30 * 24 * 60 * 60 * 1000;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function userAccountMetadata(user: Record<string, unknown>): Pick<AuthUser, "createdAt" | "updatedAt" | "plan"> {
-  const metadata: Pick<AuthUser, "createdAt" | "updatedAt" | "plan"> = {};
+function userAccountMetadata(user: Record<string, unknown>): Pick<AuthUser, "createdAt" | "updatedAt" | "plan" | "age" | "gender" | "country"> {
+  const metadata: Pick<AuthUser, "createdAt" | "updatedAt" | "plan" | "age" | "gender" | "country"> = {};
   const createdAt = typeof user.createdAt === "string" ? user.createdAt : user.created_at;
   const updatedAt = typeof user.updatedAt === "string" ? user.updatedAt : user.updated_at;
   if (typeof createdAt === "string") metadata.createdAt = createdAt;
   if (typeof updatedAt === "string") metadata.updatedAt = updatedAt;
+  if (typeof user.age === "number" || user.age === null) metadata.age = user.age;
+  if (typeof user.gender === "string") metadata.gender = user.gender;
+  if (typeof user.country === "string") metadata.country = user.country;
   if (user.plan === "free" || user.plan === "standard" || user.plan === "premium") {
     metadata.plan = user.plan;
   }
@@ -45,8 +46,12 @@ function isBook(value: unknown): value is Book {
 }
 
 function sessionFromResponse(payload: unknown): AuthSession {
-  if (!isRecord(payload) || typeof payload.token !== "string" || !isRecord(payload.user)) {
+  if (!isRecord(payload) || typeof payload.token !== "string" ||
+      typeof payload.expiresAt !== "string" || !isRecord(payload.user)) {
     throw new Error("The Shelve server did not return a valid sign-in session.");
+  }
+  if (!Number.isFinite(Date.parse(payload.expiresAt))) {
+    throw new Error("The Shelve server returned an invalid session expiry.");
   }
   const rawUser = payload.user;
   const id = typeof rawUser.id === "string" ? rawUser.id : typeof rawUser._id === "string" ? rawUser._id : "";
@@ -59,17 +64,85 @@ function sessionFromResponse(payload: unknown): AuthSession {
   if (!user.id || !user.email) throw new Error("The Shelve server returned an incomplete user profile.");
   return {
     token: payload.token,
-    expiresAt: new Date(Date.now() + SESSION_LENGTH_MS).toISOString(),
+    expiresAt: payload.expiresAt,
+    rememberMe: payload.rememberMe === true,
     user,
   };
 }
 
-export async function signInOnline(email: string, password: string): Promise<AuthSession> {
+export async function signInOnline(email: string, password: string, rememberMe = false): Promise<AuthSession> {
   const payload = await apiRequest("/api/auth/signin", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, rememberMe }),
   });
   return sessionFromResponse(payload);
+}
+
+export async function updateSessionPreferenceOnline(
+  token: string,
+  password: string,
+  rememberMe: boolean,
+): Promise<AuthSession> {
+  const payload = await apiRequest("/api/auth/session", {
+    method: "PATCH",
+    body: JSON.stringify({ password, rememberMe }),
+  }, token);
+  return sessionFromResponse(payload);
+}
+
+export async function updateProfileOnline(
+  token: string,
+  password: string,
+  profile: { name: string; age: number | null; gender: string; country: string },
+): Promise<AuthUser> {
+  const payload = await apiRequest("/api/auth/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ password, ...profile }),
+  }, token);
+  const user = isRecord(payload) && isRecord(payload.user) ? payload.user : null;
+  if (!user || typeof user.id !== "string" || typeof user.name !== "string" || typeof user.email !== "string") {
+    throw new Error("The Shelve server returned an invalid profile.");
+  }
+  return { id: user.id, name: user.name, email: user.email, ...userAccountMetadata(user) };
+}
+
+export async function requestPasswordResetOnline(email: string): Promise<void> {
+  await apiRequest("/api/auth/password/forgot", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPasswordOnline(token: string, newPassword: string): Promise<void> {
+  await apiRequest("/api/auth/password/reset", {
+    method: "POST",
+    body: JSON.stringify({ token, newPassword }),
+  });
+}
+
+export async function deleteAccountOnline(token: string, password: string): Promise<void> {
+  await apiRequest("/api/auth/account/delete", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  }, token);
+}
+
+export async function verifyAccountPasswordOnline(token: string, password: string): Promise<void> {
+  await apiRequest("/api/auth/password/verify", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  }, token);
+}
+
+export async function replaceCloudDataOnline(
+  token: string,
+  password: string,
+  data: Record<string, unknown>,
+): Promise<void> {
+  await apiRequest("/api/sync/replace", {
+    method: "POST",
+    body: JSON.stringify({ password, data }),
+  }, token);
 }
 
 export interface SignUpResult {
@@ -148,27 +221,33 @@ export async function uploadBookAssets(book: Book, token: string, file?: File, c
   return result;
 }
 
-export async function syncOfflineDataToCloud(token: string, force = false): Promise<void> {
+export async function syncOfflineDataToCloud(token: string, force = false, replacePassword?: string): Promise<void> {
   if (!isTauri()) return;
   const queue = await invoke<unknown[]>("db_get_sync_queue");
   if (!Array.isArray(queue)) throw new Error("The local sync queue is invalid.");
   const pending = (await hasPendingOfflineSync()) || queue.length > 0;
   if (!pending && !force) return;
 
-  if (pending) {
+  if (pending || replacePassword !== undefined) {
     const exported = await invoke<unknown>("db_export_all_json");
     if (!isRecord(exported) || !Array.isArray(exported.books)) {
       throw new Error("The local database returned an invalid sync payload.");
     }
     if (!exported.books.every(isBook)) throw new Error("The local database contains an invalid book.");
-    const books = exported.books.map((book) => ({ ...book }));
+    const books = exported.books.map((book) => {
+      const localBook = { ...book };
+      if (replacePassword !== undefined) {
+        delete localBook.remoteFileName;
+        delete localBook.remoteCoverFileName;
+      }
+      return localBook;
+    });
 
     for (const book of books) {
       let fileReferencesChanged = false;
-      if (book.fileKey && !book.remoteFileName) {
+      if (book.fileKey && (replacePassword !== undefined || !book.remoteFileName)) {
         const file = await readLocalFile(book.fileKey, book.fileMimeType, book.fileName);
         if (file) {
-          if (file.size > 20 * 1024 * 1024) throw new Error(`"${book.title}" is over the 20 MiB cloud upload limit.`);
           book.remoteFileName = await uploadApiFile(
             token,
             "books",
@@ -178,7 +257,7 @@ export async function syncOfflineDataToCloud(token: string, force = false): Prom
           fileReferencesChanged = true;
         } else throw new Error(`The local file for "${book.title}" is missing; the upload remains pending.`);
       }
-      if (book.coverImage.startsWith("asset:") && !book.remoteCoverFileName) {
+      if (book.coverImage.startsWith("asset:") && (replacePassword !== undefined || !book.remoteCoverFileName)) {
         const key = book.coverImage.slice("asset:".length);
         const file = await readCoverFile(key, book.coverMimeType, book.coverFileName)
           ?? await readLocalFile(key, book.coverMimeType, book.coverFileName);
@@ -199,7 +278,11 @@ export async function syncOfflineDataToCloud(token: string, force = false): Prom
       ? await Promise.all(exported.writings.map(async (value) => {
         if (!isRecord(value) || !isRecord(value.coverDesign)) return value;
         const coverDesign = { ...value.coverDesign };
-        if (typeof coverDesign.imageKey === "string" && !coverDesign.remoteImageName) {
+        if (replacePassword !== undefined) {
+          delete coverDesign.remoteImageName;
+          delete coverDesign.appliedRemoteCoverName;
+        }
+        if (typeof coverDesign.imageKey === "string" && (replacePassword !== undefined || !coverDesign.remoteImageName)) {
           const image = await readCoverFile(
             coverDesign.imageKey,
             typeof coverDesign.imageMimeType === "string" ? coverDesign.imageMimeType : undefined,
@@ -214,7 +297,7 @@ export async function syncOfflineDataToCloud(token: string, force = false): Prom
             );
           } else throw new Error(`The local writing cover "${coverDesign.imageFileName ?? "image"}" is missing.`);
         }
-        if (typeof coverDesign.appliedCoverKey === "string" && !coverDesign.appliedRemoteCoverName) {
+        if (typeof coverDesign.appliedCoverKey === "string" && (replacePassword !== undefined || !coverDesign.appliedRemoteCoverName)) {
           const appliedCover = await readLocalFile(coverDesign.appliedCoverKey, "image/png", "cover.png");
           if (appliedCover) {
             coverDesign.appliedRemoteCoverName = await uploadApiFile(
@@ -232,7 +315,11 @@ export async function syncOfflineDataToCloud(token: string, force = false): Prom
       : [];
     const payload = { ...exported, books, writings };
     await invoke("db_mark_sync_assets_synced");
-    await apiRequest("/api/sync/merge", { method: "POST", body: JSON.stringify(payload) }, token);
+    if (replacePassword !== undefined) {
+      await replaceCloudDataOnline(token, replacePassword, payload);
+    } else {
+      await apiRequest("/api/sync/merge", { method: "POST", body: JSON.stringify(payload) }, token);
+    }
   }
 
   const remote = await apiRequest("/api/sync/pull", { method: "GET" }, token);

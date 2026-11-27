@@ -379,7 +379,7 @@ export default function ReadingPlannerPage({ books }: { books: Book[] }) {
   return (
     <div className="p-4  ">
       {confirmationDialog}
-      <SectionTitle eyebrow="MAKE TIME FOR A GOOD STORY" title="Reading planner" detail="Build a routine and track books toward your finish-by date." />
+      <SectionTitle eyebrow={t("MAKE TIME FOR A GOOD STORY")} title={t("Reading planner")} detail={t("Build a routine and track books toward your finish-by date.")} />
       <section className="w-full " aria-labelledby="scheduled-reading-title">
         <div className="scheduled-reading-heading">
           <div>

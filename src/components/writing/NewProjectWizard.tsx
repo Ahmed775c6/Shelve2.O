@@ -1,20 +1,24 @@
-import { BookOpen, Clapperboard, FileText, Folder, FolderOpen, GraduationCap, Terminal, X } from "lucide-react";
+import { BookOpen, Clapperboard, FileText, Folder, FolderOpen, GraduationCap, LoaderCircle, Terminal, X } from "lucide-react";
 import type { WritingFormatType, WritingGenreCategory } from "../../types";
 
 export type NewProjectDraft = {
   title: string;
+  parentPath: string;
   formatType: WritingFormatType;
   genre: WritingGenreCategory;
   targetWordGoal: string;
   starterEnabled: boolean;
   aiTemplatesEnabled: boolean;
+  syncOnline: boolean;
 };
 
 interface NewProjectWizardProps {
   draft: NewProjectDraft;
   onChange: (draft: NewProjectDraft) => void;
   onCancel: () => void;
-  onCreate: () => void;
+  onChooseLocation: () => void;
+  onCreate: () => void | Promise<void>;
+  isCreating: boolean;
   t: (value: string) => string;
 }
 
@@ -100,7 +104,7 @@ const previewFileColor = (ext: string) => {
   return "text-teal-400";
 };
 
-export function NewProjectWizard({ draft, onChange, onCancel, onCreate, t }: NewProjectWizardProps) {
+export function NewProjectWizard({ draft, onChange, onCancel, onChooseLocation, onCreate, isCreating, t }: NewProjectWizardProps) {
   const preview = PREVIEW[draft.formatType] ?? PREVIEW["Book / Novel"];
   const projectName = slugify(draft.title);
   const previewFolders = preview.folders
@@ -113,9 +117,10 @@ export function NewProjectWizard({ draft, onChange, onCancel, onCreate, t }: New
       className="h-full w-full overflow-x-hidden overflow-y-hidden border border-[var(--line)] bg-[color-mix(in_srgb,var(--surface)_88%,transparent)] shadow-2xl backdrop-blur-xl"
       role="dialog"
       aria-modal="true"
+      aria-busy={isCreating}
       aria-labelledby="create-project-title"
     >
-      <form className="flex h-full flex-col" onSubmit={(event) => { event.preventDefault(); onCreate(); }}>
+      <form className="flex h-full flex-col" onSubmit={(event) => { event.preventDefault(); void onCreate(); }}>
         <header className="col-span-full h-12 mt-10 px-4 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--titlebar-surface)_78%,transparent)] backdrop-blur-xl flex items-center justify-between">
           <button type="button" onClick={onCancel} className="grid hidden place-items-center text-[var(--text-2)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-highlight)]" aria-label={t("Close")}><X size={13} /></button>
         </header>
@@ -173,9 +178,9 @@ export function NewProjectWizard({ draft, onChange, onCancel, onCreate, t }: New
                   id="new-project-location"
                   readOnly
                   className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-[11px] text-[var(--text)] outline-none"
-                  value={`~/ShelveStudio/${projectName}`}
+                  value={`~/Documents/${draft.parentPath}/${projectName}`}
                 />
-                <button type="button" className="grid h-full w-8 shrink-0 place-items-center border-l border-[var(--line)] text-[var(--text-2)] hover:bg-[var(--surface-2)]" aria-label={t("Choose location")} title={t("Choose location")}>
+                <button type="button" disabled={isCreating} onClick={onChooseLocation} className="grid h-full w-8 shrink-0 place-items-center border-l border-[var(--line)] text-[var(--text-2)] hover:bg-[var(--surface-2)] disabled:opacity-50" aria-label={t("Choose location")} title={t("Choose location")}>
                   <FolderOpen size={13} />
                 </button>
               </div>
@@ -230,6 +235,15 @@ export function NewProjectWizard({ draft, onChange, onCancel, onCreate, t }: New
               />
               <span>{t("Include AI Co-Worker scene templates (.s)")}</span>
             </label>
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <input
+                type="checkbox"
+                checked={draft.syncOnline}
+                onChange={(event) => onChange({ ...draft, syncOnline: event.target.checked })}
+                className="size-3.5 accent-[var(--accent-primary)]"
+              />
+              <span>{t("Sync this project online")}</span>
+            </label>
           </div>
 
           <aside className="w-full max-w-70 border-l border-[var(--line)] bg-[color-mix(in_srgb,var(--surface-2)_82%,transparent)] backdrop-blur-lg p-3.5 max-sm:w-full max-sm:border-l-0 max-sm:border-t max-sm:border-[var(--line)]">
@@ -244,7 +258,7 @@ export function NewProjectWizard({ draft, onChange, onCancel, onCreate, t }: New
               ))}
               {previewFolders.map((folder) => (
                 <div key={folder.name} className="mt-1">
-                  <div className="flex w-full items-center gap-1.5 whitespace-nowrap truncate text-foreground"><Folder size={11} className={folder.color} /><span className="truncate">{folder.name}/</span></div>
+                  <div className="flex w-full items-center gap-1.5 whitespace-nowrap truncate text-foreground"><Folder size={11} className={folder.color} /><span className="truncate">{t(folder.name)}/</span></div>
                   {folder.files.map((file) => (
                     <div key={file.name} className="ml-5 flex w-[calc(225px-40px)] items-center justify-between gap-2 whitespace-nowrap truncate text-muted-foreground">
                       <span className="flex min-w-0 items-center gap-1.5 truncate"><FileText size={10} className={`shrink-0 ${previewFileColor(file.ext)}`} /><span className="truncate">{file.name}</span></span>
@@ -258,8 +272,11 @@ export function NewProjectWizard({ draft, onChange, onCancel, onCreate, t }: New
         </div>
 
         <footer className="h-12 px-5 border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--surface)_82%,transparent)] backdrop-blur-xl flex items-center justify-end gap-1.5">
-          <button type="button" onClick={onCancel} className="border border-[var(--accent-primary)] bg-[var(--accent-soft)] px-2 text-[9px] leading-none text-[var(--accent-highlight)] hover:bg-[var(--accent-primary)] hover:text-[var(--accent-foreground)]">{t("Cancel")}</button>
-          <button type="submit" className="px-2 text-xs leading-none font-medium text-[var(--accent-foreground)] hover:brightness-110 uppercase">{t("Create")}</button>
+          <button type="button" disabled={isCreating} onClick={onCancel} className="border border-[var(--accent-primary)] bg-[var(--accent-soft)] px-2 text-[9px] leading-none text-[var(--accent-highlight)] hover:bg-[var(--accent-primary)] hover:text-[var(--accent-foreground)] disabled:opacity-50">{t("Cancel")}</button>
+          <button type="submit" disabled={isCreating} className="inline-flex items-center gap-1.5 px-2 text-xs leading-none font-medium text-[var(--accent-foreground)] hover:brightness-110 uppercase disabled:cursor-wait disabled:opacity-70">
+            {isCreating && <LoaderCircle size={13} className="animate-spin" aria-hidden="true" />}
+            {isCreating ? t("Saving…") : t("Create")}
+          </button>
         </footer>
       </form>
     </div>
