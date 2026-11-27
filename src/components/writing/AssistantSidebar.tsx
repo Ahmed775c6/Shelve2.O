@@ -84,7 +84,7 @@ export function AssistantSidebar({
   return (
     <aside className="studio-assistant-panel studio-copilot-panel">
       <header className="studio-copilot-header">
-        <strong>AI CO-WORKER</strong>
+        <strong>{t("AI CO-WORKER")}</strong>
         <div>
           <button type="button" title={t("New Chat")} aria-label={t("New Chat")} onClick={onStartNewChat}><Plus size={15} /></button>
           <button type="button" title={t("Chat History")} aria-label={t("Chat History")} aria-pressed={assistantHistoryOpen} onClick={() => setAssistantHistoryOpen((open) => !open)}><History size={15} /></button>

@@ -6,6 +6,7 @@ import {
 } from "fabric";
 import type { WritingBackCoverTemplate, WritingCoverDesign, WritingFrontCoverTemplate } from "../types";
 import { matchesShortcut } from "../lib/keyboard-shortcuts";
+import { useLanguage } from "./language-provider";
 
 type CoverSide = "front" | "back" | "wrap" | "mockup";
 type CanvasState = Record<string, unknown>;
@@ -127,6 +128,7 @@ function HardcoverMockup({
   onAutoRotateChange: (enabled: boolean) => void;
   angleResetKey: number;
 }) {
+  const { t } = useLanguage();
   const yaw = useMotionValue(-25);
   const pitch = useMotionValue(6);
   const smoothYaw = useSpring(yaw, { stiffness: 90, damping: 22, mass: 0.8 });
@@ -176,7 +178,7 @@ function HardcoverMockup({
       <div
         className={`fabric-hardcover-mockup-stage ${dragging ? "is-dragging" : ""}`}
         role="img"
-        aria-label="Interactive 3D hardcover preview. Drag to rotate."
+        aria-label={t("Interactive 3D hardcover preview. Drag to rotate.")}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

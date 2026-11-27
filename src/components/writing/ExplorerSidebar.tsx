@@ -164,7 +164,7 @@ export function ExplorerSidebar({
   return (
     <aside className="studio-drafts-panel studio-explorer">
       <header className="studio-explorer-header">
-        <strong>EXPLORER</strong>
+        <strong>{t("EXPLORER")}</strong>
         <div className="studio-explorer-actions">
           <BasePopover.Root open={filePickerOpen} onOpenChange={(open) => {
             if (open) onOpenFilePicker();
@@ -188,12 +188,12 @@ export function ExplorerSidebar({
                       {EXPLORER_CATEGORY_ORDER.map((category) => {
                         const definition = EXPLORER_CATEGORIES[category];
                         const Icon = definition.fileIcon;
-                        return <button key={category} type="button" title={`${EXPLORER_FILE_PICKER_LABELS[category]} (${definition.extension})`} aria-pressed={newFileCategory === category} className={`flex flex-row items-center gap-2 px-2.5 py-1.5 text-xs rounded-md border text-left truncate ${newFileCategory === category ? "border-primary bg-primary/10" : "border-border hover:bg-accent/50"}`} onClick={() => {
+                        return <button key={category} type="button" title={`${t(EXPLORER_FILE_PICKER_LABELS[category])} (${definition.extension})`} aria-pressed={newFileCategory === category} className={`flex flex-row items-center gap-2 px-2.5 py-1.5 text-xs rounded-md border text-left truncate ${newFileCategory === category ? "border-primary bg-primary/10" : "border-border hover:bg-accent/50"}`} onClick={() => {
                           setNewFileCategory(category);
                           if (!fileNameEdited && activeProject) setNewFileName(onDefaultFileTitle(activeProject, selectedExplorerChapter, category));
                         }}>
                           <Icon className={`shrink-0 ${definition.fileClass}`} size={14} />
-                          <span className="min-w-0 flex-1 truncate">{EXPLORER_FILE_PICKER_LABELS[category]}</span>
+                          <span className="min-w-0 flex-1 truncate">{t(EXPLORER_FILE_PICKER_LABELS[category])}</span>
                           <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px]">{definition.extension}</code>
                         </button>;
                       })}
@@ -237,12 +237,12 @@ export function ExplorerSidebar({
                       {EXPLORER_CATEGORY_ORDER.map((category) => {
                         const definition = EXPLORER_CATEGORIES[category];
                         const Icon = definition.folderIcon;
-                        return <button key={category} type="button" title={EXPLORER_FOLDER_PICKER_LABELS[category]} aria-pressed={newFolderCategory === category} className={`flex flex-row items-center gap-2 px-2.5 py-1.5 text-xs rounded-md border text-left truncate ${newFolderCategory === category ? "border-primary bg-primary/10" : "border-border hover:bg-accent/50"}`} onClick={() => {
+                        return <button key={category} type="button" title={t(EXPLORER_FOLDER_PICKER_LABELS[category])} aria-pressed={newFolderCategory === category} className={`flex flex-row items-center gap-2 px-2.5 py-1.5 text-xs rounded-md border text-left truncate ${newFolderCategory === category ? "border-primary bg-primary/10" : "border-border hover:bg-accent/50"}`} onClick={() => {
                           setNewFolderCategory(category);
                           if (!folderNameEdited && activeProject) setNewFolderName(onDefaultFolderTitle(activeProject, category));
                         }}>
                           <Icon className={`shrink-0 ${definition.folderClass}`} size={14} />
-                          <span className="min-w-0 flex-1 truncate">{EXPLORER_FOLDER_PICKER_LABELS[category]}</span>
+                          <span className="min-w-0 flex-1 truncate">{t(EXPLORER_FOLDER_PICKER_LABELS[category])}</span>
                         </button>;
                       })}
                     </div>
@@ -299,12 +299,12 @@ export function ExplorerSidebar({
                             {EXPLORER_CATEGORY_ORDER.map((category) => {
                               const definition = EXPLORER_CATEGORIES[category];
                               const Icon = definition.folderIcon;
-                              return <DropdownMenuItem key={`folder-${category}`} className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onCreateChapter(project.id, undefined, category)}><Icon className={`shrink-0 ${definition.folderClass}`} size={13} />{EXPLORER_FOLDER_MENU_LABELS[category]}</DropdownMenuItem>;
+                              return <DropdownMenuItem key={`folder-${category}`} className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onCreateChapter(project.id, undefined, category)}><Icon className={`shrink-0 ${definition.folderClass}`} size={13} />{t(EXPLORER_FOLDER_MENU_LABELS[category])}</DropdownMenuItem>;
                             })}
                             {EXPLORER_CATEGORY_ORDER.map((category) => {
                               const definition = EXPLORER_CATEGORIES[category];
                               const Icon = definition.fileIcon;
-                              return <DropdownMenuItem key={`file-${category}`} className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onCreatePage(project.id, null, definition.fileKind, undefined, "", category)}><Icon className={`shrink-0 ${definition.fileClass}`} size={13} />{EXPLORER_FILE_PICKER_LABELS[category]} File ({definition.extension})</DropdownMenuItem>;
+                              return <DropdownMenuItem key={`file-${category}`} className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onCreatePage(project.id, null, definition.fileKind, undefined, "", category)}><Icon className={`shrink-0 ${definition.fileClass}`} size={13} />{t(EXPLORER_FILE_PICKER_LABELS[category])} {t("File")} ({definition.extension})</DropdownMenuItem>;
                             })}
                             <DropdownMenuItem className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onDuplicateProject(project.id)}>{t("Duplicate project")}</DropdownMenuItem>
                           </DropdownMenuContent>
@@ -346,7 +346,7 @@ export function ExplorerSidebar({
                                     {EXPLORER_CATEGORY_ORDER.map((category) => {
                                       const definition = EXPLORER_CATEGORIES[category];
                                       const Icon = definition.fileIcon;
-                                      return <DropdownMenuItem key={`chapter-file-${category}`} className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onCreatePage(project.id, chapter.id, definition.fileKind, undefined, "", category)}><Icon className={`shrink-0 ${definition.fileClass}`} size={13} />{EXPLORER_FILE_PICKER_LABELS[category]} File ({definition.extension})</DropdownMenuItem>;
+                                      return <DropdownMenuItem key={`chapter-file-${category}`} className={EXPLORER_MENU_ITEM_CLASS} onClick={() => onCreatePage(project.id, chapter.id, definition.fileKind, undefined, "", category)}><Icon className={`shrink-0 ${definition.fileClass}`} size={13} />{t(EXPLORER_FILE_PICKER_LABELS[category])} {t("File")} ({definition.extension})</DropdownMenuItem>;
                                     })}
                                     <DropdownMenuItem className={EXPLORER_MENU_ITEM_CLASS} disabled={index === 0} onClick={() => onMoveChapter(project.id, chapter.id, -1)}><MoveUp size={12} />{t("Move up")}</DropdownMenuItem>
                                     <DropdownMenuItem className={EXPLORER_MENU_ITEM_CLASS} disabled={index === project.chapters.length - 1} onClick={() => onMoveChapter(project.id, chapter.id, 1)}><MoveDown size={12} />{t("Move down")}</DropdownMenuItem>

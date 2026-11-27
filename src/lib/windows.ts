@@ -32,7 +32,7 @@ export async function openAuxiliaryWindow(kind: AuxiliaryWindow, bookId?: string
     ? { width: 900, height: 450, minWidth: 620, minHeight: 500, title: "Shelve — Reading planner" }
     : kind === "edit-book"
       ? { width: 600, height: 500, minWidth: 560, minHeight: 500, title: "Shelve — Edit book" }
-      : { width: 600, height: 500, minWidth: 560, minHeight: 500, title: "Shelve — Add book" };
+      : { width: 800, height: 700, minWidth: 560, minHeight: 500, title: "Shelve — Add book" };
 
   const webview = new WebviewWindow(label, {
     url: kind === "studio" ? "/studio" : `/?${query.toString()}`,

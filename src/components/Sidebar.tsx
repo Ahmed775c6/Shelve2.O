@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import {
-  Archive, BarChart3, BookOpen, CalendarDays,
-  Compass, Globe, LayoutDashboard, Library, MessageSquare, PenLine, Settings,
+  Archive, BarChart3, Bell, BookOpen, CalendarDays,
+  Compass, Globe, LayoutDashboard, Library, MessageSquare, MessageSquarePlus, PenLine, Settings,
   Sparkles, UploadCloud, UserRound,
 } from "lucide-react";
 import type { AppView, Book } from "../types";
@@ -31,6 +31,8 @@ const links: { label: string; view: AppView; icon: typeof LayoutDashboard }[] = 
   { label: "Upload book", view: "upload", icon: UploadCloud },
   { label: "Discover", view: "recommendations", icon: Compass },
   { label: "Ask about a book", view: "ask", icon: MessageSquare },
+  { label: "Notifications", view: "notifications", icon: Bell },
+  { label: "Insights & bug reports", view: "feedback", icon: MessageSquarePlus },
 ];
 
 const mobileLinks: { label: string; view: AppView; icon: typeof LayoutDashboard }[] = [
@@ -38,6 +40,7 @@ const mobileLinks: { label: string; view: AppView; icon: typeof LayoutDashboard 
   { label: "Library", view: "library", icon: Library },
   { label: "Reading", view: "reading", icon: BookOpen },
   { label: "Profile", view: "profile", icon: UserRound },
+  { label: "Notifications", view: "notifications", icon: Bell },
 ];
 
 export default function Sidebar({ activeView, books, collapsed, mobileOpen, onClose, profileAvatar, userName, userEmail, onNavigate, onOpenStudio }: SidebarProps) {
@@ -96,7 +99,7 @@ export default function Sidebar({ activeView, books, collapsed, mobileOpen, onCl
         </button>
       </nav>
       <button className={`sidebar-profile ${activeView === "profile" ? "active" : ""}`} onClick={() => onNavigate("profile")} title={t("Profile")} aria-label={t("Open profile settings")}>
-        <div className="profile-avatar">{profileAvatar ? <img src={profileAvatar} alt="" /> : <UserRound size={17} />}</div>
+        <div className="profile-avatar">{profileAvatar ? <img className = "max-h-12.5 h-12.5" src={profileAvatar} alt="" /> : <UserRound size={17} />}</div>
         {!isCollapsed && <div className="profile-text"><strong>{userName || t("Reader")}</strong><span>{userEmail || t("Local library")}</span></div>}
       </button>
       <div className="sidebar-footer"><Sparkles size={13} />{!isCollapsed && <span>{t("Make room for a good story.")}</span>}</div>

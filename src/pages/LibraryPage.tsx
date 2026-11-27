@@ -17,8 +17,8 @@ export default function LibraryPage({ books, search, onOpenBook, onStartBook, on
   return (
     <div className="page-shell">
       <SectionTitle
-        eyebrow="COLLECTION OVERVIEW"
-        title="My library"
+        eyebrow={t("COLLECTION OVERVIEW")}
+        title={t("My library")}
         detail={`${books.length.toLocaleString(locale)} ${t("books across your collection")}`}
         action={<button className="button button-primary" onClick={onAddBook}><Plus size={15} /> {t("Add book")}</button>}
       />

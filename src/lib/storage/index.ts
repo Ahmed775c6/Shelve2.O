@@ -1,15 +1,20 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { BaseDirectory } from "@tauri-apps/api/path";
+import { BaseDirectory, documentDir, join } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { exists, mkdir, readFile as readAppFile, remove, writeFile } from "@tauri-apps/plugin-fs";
-import type { AuthSession, Book, StorageMode } from "../../types";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { exists, mkdir, readFile as readAppFile, readTextFile, remove, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import type { AuthSession, Book, StorageMode, WritingProject } from "../../types";
 import { apiRequest, downloadApiFile, uploadApiFile } from "../api";
 
 const FILES_DIRECTORY = "files";
 const MODE_KEY = "shelve-storage-mode-v1";
 const AUTH_KEY = "shelve-auth-session-v1";
 const PENDING_SYNC_KEY = "cloud-sync-pending";
+const LOCAL_WRITING_PROJECTS_KEY = "shelve-studio-local-project-paths-v1";
+const LOCAL_WRITING_PROJECTS_DIRECTORY = "ShelveStudio";
+const LOCAL_WRITING_PROJECT_MANIFEST = ".shelve/project.json";
+const LOCAL_WRITING_SESSIONS_FILE = ".shelve/writing-sessions.json";
 const WRITING_ID = "00000000-0000-4000-8000-000000000001";
 
 const collectionPaths = {
@@ -37,6 +42,7 @@ const localCommands = {
 } as const;
 
 export type StorageCollection = keyof typeof collectionPaths;
+type LocalWritingProject = WritingProject & StoredRecord & { localPath: string };
 
 export interface StorageProvider {
   configure(mode: StorageMode, token: string | null): void;
@@ -85,6 +91,216 @@ const cachedRecords = new Map<StorageCollection, Map<string, StoredRecord>>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isLocalWritingProject(value: unknown): value is LocalWritingProject {
+  return isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.localPath === "string" &&
+    isSafeLocalWritingPath(value.localPath) &&
+    Array.isArray(value.chapters);
+}
+
+function isSafeLocalWritingPath(path: string): boolean {
+  const segments = path.replace(/\\/g, "/").split("/");
+  return segments.length >= 2 &&
+    segments[0] === LOCAL_WRITING_PROJECTS_DIRECTORY &&
+    segments.every((segment) => Boolean(segment) && segment !== "." && segment !== ".." &&
+      !/[<>:"|?*\u0000-\u001f]/.test(segment) && !/[. ]$/.test(segment));
+}
+
+function safeProjectPathSegment(value: string): string {
+  const segment = value.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "");
+  if (!segment || segment === "." || segment === "..") return "Untitled project";
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(segment) ? `${segment}-item` : segment;
+}
+
+function projectChapterPaths(project: LocalWritingProject): string[] {
+  const usedFolderNames = new Set<string>();
+  return project.chapters.map((chapter) => {
+    const baseName = safeProjectPathSegment(chapter.title || "Untitled folder");
+    let folderName = baseName;
+    for (let suffix = 2; usedFolderNames.has(folderName.toLocaleLowerCase()); suffix += 1) folderName = `${baseName} (${suffix})`;
+    usedFolderNames.add(folderName.toLocaleLowerCase());
+    return `${project.localPath}/${folderName}`;
+  });
+}
+
+function projectFiles(project: LocalWritingProject): Array<{ path: string; content: string }> {
+  const files: Array<{ path: string; content: string }> = [];
+  const chapterPaths = projectChapterPaths(project);
+  const addPages = (parent: string, pages: WritingProject["pages"]) => {
+    const usedNames = new Set<string>();
+    for (const page of pages ?? []) {
+      const baseName = safeProjectPathSegment(page.title || "Untitled page");
+      let fileName = baseName;
+      for (let suffix = 2; usedNames.has(fileName.toLocaleLowerCase()); suffix += 1) {
+        const extensionStart = baseName.lastIndexOf(".");
+        fileName = extensionStart > 0
+          ? `${baseName.slice(0, extensionStart)} (${suffix})${baseName.slice(extensionStart)}`
+          : `${baseName} (${suffix})`;
+      }
+      usedNames.add(fileName.toLocaleLowerCase());
+      files.push({ path: `${parent}/${fileName}`, content: page.content ?? "" });
+    }
+  };
+  addPages(project.localPath, project.pages);
+  for (const [index, chapter] of project.chapters.entries()) {
+    const chapterPath = chapterPaths[index];
+    if (chapter.content) files.push({ path: `${chapterPath}/.chapter-content.md`, content: chapter.content });
+    addPages(chapterPath, chapter.pages);
+  }
+  return files;
+}
+
+async function loadLocalWritingProjects(): Promise<LocalWritingProject[]> {
+  if (!isTauri()) return [];
+  const storedPaths = await getSetting(LOCAL_WRITING_PROJECTS_KEY);
+  if (!storedPaths) return [];
+  const paths = parseJson<unknown>(storedPaths, "The local Writing Studio project index");
+  if (!Array.isArray(paths) || !paths.every((path) => typeof path === "string" && isSafeLocalWritingPath(path))) {
+    throw new Error("The local Writing Studio project index is invalid.");
+  }
+  const projects = await Promise.all(paths.map(async (path) => {
+    const manifestPath = `${path}/${LOCAL_WRITING_PROJECT_MANIFEST}`;
+    const manifest = parseJson<unknown>(
+      await readTextFile(manifestPath, { baseDir: BaseDirectory.Document }),
+      `The local project file at ${manifestPath}`,
+    );
+    if (!isLocalWritingProject(manifest) || manifest.localPath !== path) {
+      throw new Error(`The local project file at ${manifestPath} is invalid.`);
+    }
+    return manifest;
+  }));
+  return projects;
+}
+
+async function saveLocalWritingProjects(records: StoredRecord[]): Promise<void> {
+  if (!isTauri()) {
+    if (records.some((record) => typeof record.localPath === "string")) {
+      throw new Error("Local Writing Studio project folders are available only in the desktop app.");
+    }
+    return;
+  }
+  const localProjects = records.filter(isLocalWritingProject);
+  for (const project of localProjects) {
+    await mkdir(project.localPath, { baseDir: BaseDirectory.Document, recursive: true });
+    await mkdir(`${project.localPath}/.shelve`, { baseDir: BaseDirectory.Document, recursive: true });
+    const manifestPath = `${project.localPath}/${LOCAL_WRITING_PROJECT_MANIFEST}`;
+    let previousFiles: Array<{ path: string; content: string }> = [];
+    if (await exists(manifestPath, { baseDir: BaseDirectory.Document })) {
+      const previousProject = parseJson<unknown>(
+        await readTextFile(manifestPath, { baseDir: BaseDirectory.Document }),
+        `The local project file at ${manifestPath}`,
+      );
+      if (!isLocalWritingProject(previousProject)) {
+        throw new Error(`The local project file at ${manifestPath} is invalid.`);
+      }
+      previousFiles = projectFiles(previousProject);
+    }
+    const nextFiles = projectFiles(project);
+    const nextPaths = new Set(nextFiles.map((file) => file.path));
+    for (const file of previousFiles) {
+      if (!nextPaths.has(file.path) && await exists(file.path, { baseDir: BaseDirectory.Document })) {
+        await remove(file.path, { baseDir: BaseDirectory.Document });
+      }
+    }
+    for (const file of nextFiles) {
+      const parent = file.path.slice(0, file.path.lastIndexOf("/"));
+      await mkdir(parent, { baseDir: BaseDirectory.Document, recursive: true });
+      await writeTextFile(file.path, file.content, { baseDir: BaseDirectory.Document });
+    }
+    for (const chapterPath of projectChapterPaths(project)) {
+      await mkdir(chapterPath, { baseDir: BaseDirectory.Document, recursive: true });
+    }
+    await writeTextFile(
+      manifestPath,
+      JSON.stringify(project, null, 2),
+      { baseDir: BaseDirectory.Document },
+    );
+  }
+  await setSetting(LOCAL_WRITING_PROJECTS_KEY, JSON.stringify(localProjects.map((project) => project.localPath)));
+}
+
+async function loadLocalWritingSessions(projects: LocalWritingProject[]): Promise<StoredRecord[]> {
+  const projectSessions = await Promise.all(projects.map(async (project) => {
+    const path = `${project.localPath}/${LOCAL_WRITING_SESSIONS_FILE}`;
+    if (!(await exists(path, { baseDir: BaseDirectory.Document }))) return [];
+    const sessions = parseJson<unknown>(
+      await readTextFile(path, { baseDir: BaseDirectory.Document }),
+      `The local project file at ${path}`,
+    );
+    if (!Array.isArray(sessions) || !sessions.every((session) =>
+      isRecord(session) && typeof session.id === "string" && session.projectId === project.id,
+    )) {
+      throw new Error(`The local project file at ${path} is invalid.`);
+    }
+    return sessions as StoredRecord[];
+  }));
+  return projectSessions.flat();
+}
+
+async function saveLocalWritingSessions(records: StoredRecord[], projects: LocalWritingProject[]): Promise<void> {
+  const sessionsByProject = new Map<string, StoredRecord[]>();
+  for (const record of records) {
+    if (typeof record.projectId !== "string") continue;
+    const sessions = sessionsByProject.get(record.projectId) ?? [];
+    sessions.push(record);
+    sessionsByProject.set(record.projectId, sessions);
+  }
+  for (const project of projects) {
+    const path = `${project.localPath}/${LOCAL_WRITING_SESSIONS_FILE}`;
+    await mkdir(`${project.localPath}/.shelve`, { baseDir: BaseDirectory.Document, recursive: true });
+    await writeTextFile(path, JSON.stringify(sessionsByProject.get(project.id) ?? [], null, 2), {
+      baseDir: BaseDirectory.Document,
+    });
+  }
+}
+
+function projectForOnlineStorage(record: StoredRecord): StoredRecord {
+  const { localPath: _localPath, syncOnline: _syncOnline, ...onlineRecord } = record;
+  return onlineRecord;
+}
+
+export async function chooseLocalWritingProjectFolder(): Promise<string | null> {
+  if (!isTauri()) throw new Error("Local Writing Studio project folders are available only in the desktop app.");
+  await mkdir(LOCAL_WRITING_PROJECTS_DIRECTORY, { baseDir: BaseDirectory.Document, recursive: true });
+  const documentsPath = await documentDir();
+  const defaultPath = await join(documentsPath, LOCAL_WRITING_PROJECTS_DIRECTORY);
+  const selectedPath = await openDialog({ directory: true, multiple: false, defaultPath });
+  if (!selectedPath || Array.isArray(selectedPath)) return null;
+  const normalizePath = (path: string) => path.replace(/[\\/]+/g, "\\").replace(/\\+$/g, "");
+  const documentsRoot = normalizePath(documentsPath);
+  const selected = normalizePath(selectedPath);
+  if (!selected.toLowerCase().startsWith(`${documentsRoot}\\`.toLowerCase())) {
+    throw new Error(`Choose a folder inside Documents\\${LOCAL_WRITING_PROJECTS_DIRECTORY}.`);
+  }
+  const relativePath = selected.slice(documentsRoot.length + 1).replace(/\\/g, "/");
+  if (relativePath !== LOCAL_WRITING_PROJECTS_DIRECTORY &&
+    !relativePath.startsWith(`${LOCAL_WRITING_PROJECTS_DIRECTORY}/`)) {
+    throw new Error(`Choose a folder inside Documents\\${LOCAL_WRITING_PROJECTS_DIRECTORY}.`);
+  }
+  if (!isSafeLocalWritingPath(`${relativePath}/placeholder`)) {
+    throw new Error("The selected folder path is not supported.");
+  }
+  return relativePath;
+}
+
+export async function createLocalWritingProjectPath(title: string, parentPath = LOCAL_WRITING_PROJECTS_DIRECTORY): Promise<string> {
+  if (!isTauri()) throw new Error("Local Writing Studio project folders are available only in the desktop app.");
+  if (!isSafeLocalWritingPath(`${parentPath}/placeholder`)) {
+    throw new Error("Choose a folder inside Documents\\ShelveStudio.");
+  }
+  await mkdir(parentPath, { baseDir: BaseDirectory.Document, recursive: true });
+  let baseName = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "untitled-story";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(baseName)) baseName = `${baseName}-project`;
+  for (let suffix = 1; suffix <= 100; suffix += 1) {
+    const folderName = suffix === 1 ? baseName : `${baseName} (${suffix})`;
+    const path = `${parentPath}/${folderName}`;
+    if (!(await exists(path, { baseDir: BaseDirectory.Document }))) return path;
+  }
+  throw new Error("Could not find an available folder name for this project.");
 }
 
 function isBook(value: unknown): value is Book {
@@ -514,6 +730,21 @@ export async function loadRecords<T extends StoredRecord>(collection: StorageCol
   for (const record of records) cache.set(record.id, record);
   cachedRecords.set(collection, cache);
   if (mode === "offline" && records.length > 0) await markOfflineDataPending();
+  if (!isTauri()) return records;
+  if (collection === "writings") {
+    const localProjects = await loadLocalWritingProjects();
+    const merged = new Map<string, StoredRecord>();
+    for (const record of records) merged.set(record.id, record);
+    for (const project of localProjects) merged.set(project.id, project);
+    return Array.from(merged.values()) as T[];
+  }
+  if (collection === "writingSessions") {
+    const localSessions = await loadLocalWritingSessions(await loadLocalWritingProjects());
+    const merged = new Map<string, StoredRecord>();
+    for (const record of records) merged.set(record.id, record);
+    for (const session of localSessions) merged.set(session.id, session);
+    return Array.from(merged.values()) as T[];
+  }
   return records;
 }
 
@@ -576,14 +807,33 @@ async function deleteRecord(collection: StorageCollection, id: string): Promise<
 
 export async function saveRecords<T extends StoredRecord>(collection: StorageCollection, records: T[]): Promise<void> {
   const mode = requireMode();
+  if (collection === "writings") await saveLocalWritingProjects(records);
+  let localWritingProjects: LocalWritingProject[] = [];
+  if (collection === "writingSessions" && isTauri()) {
+    localWritingProjects = await loadLocalWritingProjects();
+    await saveLocalWritingSessions(records, localWritingProjects);
+  }
+  const localProjectsById = new Map(localWritingProjects.map((project) => [project.id, project]));
+  const shouldSaveOnline = (record: StoredRecord) => {
+    if (collection === "writings") return typeof record.localPath !== "string" || record.syncOnline === true;
+    if (collection === "writingSessions" && typeof record.projectId === "string") {
+      const localProject = localProjectsById.get(record.projectId);
+      return !localProject || localProject.syncOnline === true;
+    }
+    return true;
+  };
+  const providerRecords = collection === "writings" || collection === "writingSessions"
+    ? records.filter(shouldSaveOnline)
+      .map((record) => mode === "cloud" ? projectForOnlineStorage(record) as T : record)
+    : records;
   let previous = cachedRecords.get(collection);
   if (!previous) {
     await loadRecords(collection);
     previous = cachedRecords.get(collection) ?? new Map();
   }
-  const incomingIds = new Set(records.map((record) => record.id));
+  const incomingIds = new Set(providerRecords.map((record) => record.id));
   const next = new Map<string, StoredRecord>();
-  for (const record of records) {
+  for (const record of providerRecords) {
     if (!record.id) throw new Error(`Cannot save ${collection} without an id.`);
     const saved = await saveRecord(collection, record, previous.get(record.id));
     next.set(saved.id, saved);

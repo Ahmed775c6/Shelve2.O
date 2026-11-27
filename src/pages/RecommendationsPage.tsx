@@ -6,7 +6,7 @@ export default function RecommendationsPage({ onBrowse }: { onBrowse: () => void
   const { t } = useLanguage();
   return (
     <div className="page-shell">
-      <SectionTitle eyebrow="LIVE BOOK CATALOG" title="Discover" detail="Browse real book records from the Open Library catalog." />
+      <SectionTitle eyebrow={t("LIVE BOOK CATALOG")} title={t("Discover")} detail={t("Browse real book records from the Open Library catalog.")} />
       <div className="public-empty">
         <Globe size={23} />
         <p>{t("Search the live catalog to find your next read.")}</p>

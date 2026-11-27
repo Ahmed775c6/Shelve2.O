@@ -597,7 +597,7 @@ export default function AnalyticsPage({ books }: { books: Book[] }) {
 
   return (
     <div className="page-shell analytics-page">
-      <SectionTitle eyebrow="YOUR READING, IN PERSPECTIVE" title="Reading insights" detail="A quiet look at your reading journey." />
+      <SectionTitle eyebrow={t("YOUR READING, IN PERSPECTIVE")} title={t("Reading insights")} detail={t("A quiet look at your reading journey.")} />
 
       <div className="stats-grid analytics-stats">
         <div className="stat-card analytics-stat-card">
@@ -632,12 +632,12 @@ export default function AnalyticsPage({ books }: { books: Book[] }) {
         </div>
         <div className="stat-card analytics-stat-card analytics-stat-summary">
           <div className="analytics-stat-heading"><span>{t("Favorite category")}</span><i><Star size={15} /></i></div>
-          <strong>{favoriteCategory?.category ?? t("Not enough reading history yet.")}</strong>
+          <strong>{favoriteCategory?.category ?? t("...")}</strong>
           <small>{favoriteCategory ? `${favoriteCategory.pages.toLocaleString(locale)} ${t("pages")} ${t("read")}` : t("Read more to discover your favorite category.")}</small>
         </div>
         <div className="stat-card analytics-stat-card analytics-stat-summary">
           <div className="analytics-stat-heading"><span>{t("Favorite reading time")}</span><i><Clock3 size={15} /></i></div>
-          <strong>{favoriteTime && favoriteTime.seconds > 0 ? t(favoriteTime.labelKey) : t("Not enough reading history yet.")}</strong>
+          <strong>{favoriteTime && favoriteTime.seconds > 0 ? t(favoriteTime.labelKey) : t("...")}</strong>
           <small>{favoriteTime && favoriteTime.seconds > 0 ? `${formatDuration(favoriteTime.seconds, locale)} ${t("of tracked reading time")}` : t("Track a reading session to discover your favorite time.")}</small>
         </div>
       </div>

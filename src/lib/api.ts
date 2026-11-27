@@ -74,9 +74,7 @@ export async function uploadApiFile(
   uploadId: string,
 ): Promise<string> {
   if (!token) throw new Error("Sign in before uploading files.");
-  if (file.size === 0 || file.size > 20 * 1024 * 1024) {
-    throw new Error("Files must be larger than 0 bytes and no larger than 20 MiB.");
-  }
+  if (file.size === 0) throw new Error("Files must be larger than 0 bytes.");
   const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
   const acceptedTypes = uploadTypes[kind].get(extension);
   if (!acceptedTypes || (file.type && !acceptedTypes.includes(file.type))) {

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import {  CheckCircle2, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
+import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Mail, User } from "lucide-react";
 import { useLanguage } from "../components/language-provider";
 import { ErrorAlert } from "../components/error-feedback";
 import type { SignUpResult } from "../lib/cloud";
+import { generateSecurePassword } from "../lib/secure-password";
 
 interface SignUpPageProps {
   onSignUp: (name: string, email: string, password: string) => Promise<SignUpResult>;
@@ -46,6 +47,15 @@ export default function SignUpPage({ onSignUp, onSignIn, onBack }: SignUpPagePro
     }
   };
 
+  const generatePassword = () => {
+    const generated = generateSecurePassword();
+    setPassword(generated);
+    setConfirmPassword(generated);
+    setShowPassword(true);
+    setShowConfirmPassword(true);
+    setError("");
+  };
+
   return (
     <main className="auth-screen auth-screen-split auth-screen-signup">
       <section className="auth-panel">
@@ -83,14 +93,22 @@ export default function SignUpPage({ onSignUp, onSignIn, onBack }: SignUpPagePro
             <input type={showPassword ? "text" : "password"} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("At least 8 characters")} minLength={8} required /><button type="button" aria-label={showPassword ? t("Hide password") : t("Show password")} onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div>
           
             </label>
+          
 
             <label>{t("Confirm password")}
               <div className="auth-input-wrap">
               <Lock size={16} />
               <input type={showConfirmPassword ? "text" : "password"} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder={t("Repeat your password")} required /><button type="button" aria-label={showConfirmPassword ? t("Hide confirmation password") : t("Show confirmation password")} onClick={() => setShowConfirmPassword((value) => !value)}>{showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></label>
-             <small className="auth-hint">{t("Must be at least 8 characters")}</small>
+     <small className="auth-hint">{t("Must be at least 8 characters")}</small>
+
+             
+           <button type="button" className=" flex gap-2 p-2 bg-accent flex-row w-full justify-center items-center text-center"  onClick={generatePassword}>
+           <p>{t("Generate secure password")}</p>
+           </button>
+  
             <button className="button button-primary auth-submit" disabled={loading}>{loading ? t("Creating account...") : t("Create account")}</button>
-          </form>}
+        
+         </form>}
           {!verificationEmail && !createdAccountEmail && <p className="auth-switch">{t("Already have an account?")} <button type="button" onClick={onSignIn}>{t("Sign in")}</button></p>}
         </div>
       </section>

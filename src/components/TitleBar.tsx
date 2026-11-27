@@ -276,14 +276,19 @@ export default function TitleBar({ search, onSearch, onPlan, theme, onThemeChang
               ["cover", "Cover Designer", studioActions?.onOpenCoverDesigner],
               ["goals", "Goals", studioActions?.onOpenGoalsPage],
               ["analytics", "Analytics", studioActions?.onOpenAnalyticsPage],
-            ] as const).map(([key, label, action]) => <button
+            ] as const).map(([key, label, action]) => {
+              const selectedMode = location.pathname.endsWith("/cover") ? "cover"
+                : location.pathname.endsWith("/goals") ? "goals"
+                  : location.pathname.endsWith("/analytics") ? "analytics" : "write";
+              return <button
               type="button"
               key={key}
               role="tab"
-              className={`titlebar-no-drag ${key === "write" ? "selected" : ""}`}
-              aria-selected={key === "write"}
+              className={`titlebar-no-drag ${key === selectedMode ? "selected" : ""}`}
+              aria-selected={key === selectedMode}
               onClick={() => action?.()}
-            >{t(label)}</button>)}
+            >{t(label)}</button>;
+            })}
           </nav>
 
           <div className="studio-titlebar-actions">

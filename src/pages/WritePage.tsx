@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent } from "react";
 import { createPortal } from "react-dom";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isTauri } from "@tauri-apps/api/core";
+import { readTextFile } from "@tauri-apps/plugin-fs";
 import {
   closestCenter, KeyboardSensor, PointerSensor, pointerWithin,
   useSensor, useSensors, type CollisionDetection, type DragEndEvent, type DragOverEvent, type DragStartEvent,
@@ -27,7 +30,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../compone
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { StudioRecentProject, StudioTitlebarActions, StudioTitlebarUpdate } from "../components/TitleBar";
 import { useLanguage } from "../components/language-provider";
-import { loadRecords, saveRecords, type StoredRecord } from "../lib/storage";
+import { chooseLocalWritingProjectFolder, createLocalWritingProjectPath, loadRecords, saveRecords, type StoredRecord } from "../lib/storage";
 import { sendAiRequest } from "../lib/cloud";
 import {
   countProjectWords, countWords, editorHtmlForDocument, escapeHtml, estimatePages, markdownToRichHtml,
@@ -50,8 +53,7 @@ import { isWritingSession, newProject } from "../studio/logic/writingProject";
 import { getAiText } from "../studio/logic/aiResponse";
 import type { AssistantConversation, AssistantMessage, AssistantTool } from "../studio/logic/assistant";
 import { scaffoldWritingProject } from "../lib/writing-scaffolds";
-import { openStudioPage } from "../studio/logic/routes";
-import { openAuxiliaryWindow, toggleAuxiliaryWindow } from "../lib/windows";
+import { STUDIO_ACTIVE_PROJECT_KEY } from "../studio/logic/routes";
 import type { Book, StorageMode, WritingChapter, WritingExplorerCategory, WritingFontFamily, WritingFormatType, WritingPage, WritingPageKind, WritingPageSize, WritingPaperStyle, WritingProject, WritingSession } from "../types";
 
 type TextSelection = { start: number; end: number; text: string };
@@ -125,16 +127,18 @@ export default function WritePage({
   const editorRef = useRef<HTMLDivElement>(null);
   const editorRangeRef = useRef<Range | null>(null);
   const editorDocumentIdRef = useRef("");
+  const importDroppedManuscriptsRef = useRef<(files: Array<{ name: string; content: string }>) => Promise<void>>(async () => undefined);
   const manuscriptInputRef = useRef<HTMLInputElement>(null);
   const activeSessionRef = useRef<WritingSession | null>(null);
   const writingSessionsRef = useRef<WritingSession[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState("");
+  const [activeProjectId, setActiveProjectId] = useState(() => window.sessionStorage.getItem(STUDIO_ACTIVE_PROJECT_KEY) ?? "");
   const [activeChapterId, setActiveChapterId] = useState("");
   const [activePageId, setActivePageId] = useState("");
   const [studioMode, setStudioMode] = useState<StudioMode>("write");
   const [search, setSearch] = useState("");
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [fileDropActive, setFileDropActive] = useState(false);
   const [newFolderCategory, setNewFolderCategory] = useState<WritingExplorerCategory>("writing");
   const [newFileCategory, setNewFileCategory] = useState<WritingExplorerCategory>("writing");
   const [newFolderName, setNewFolderName] = useState("");
@@ -160,14 +164,17 @@ export default function WritePage({
   const [paperSettingsOpen, setPaperSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectCreating, setProjectCreating] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [creationDraft, setCreationDraft] = useState<NewProjectDraft>({
     title: "untitled-story",
+    parentPath: "ShelveStudio",
     formatType: "Book / Novel",
     genre: "Literary Fiction",
     targetWordGoal: "50000",
     starterEnabled: true,
     aiTemplatesEnabled: true,
+    syncOnline: false,
   });
   const [findReplaceOpen, setFindReplaceOpen] = useState(false);
   const [findText, setFindText] = useState("");
@@ -465,11 +472,19 @@ export default function WritePage({
         activeSessionRef.current = sessions.find((session) => session.date === new Date().toISOString().slice(0, 10)) ?? null;
         projectsRef.current = restored;
         setProjects(restored);
-        setActiveProjectId(restored[0]?.id ?? "");
-        setActiveChapterId(restored[0]?.chapters[0]?.id ?? "");
+        const savedActiveProjectId = window.sessionStorage.getItem(STUDIO_ACTIVE_PROJECT_KEY);
+        const restoredActiveProjectId = savedActiveProjectId === ""
+          ? ""
+          : savedActiveProjectId !== null && restored.some((project) => project.id === savedActiveProjectId)
+            ? savedActiveProjectId
+            : restored[0]?.id ?? "";
+        window.sessionStorage.setItem(STUDIO_ACTIVE_PROJECT_KEY, restoredActiveProjectId);
+        setActiveProjectId(restoredActiveProjectId);
+        const activeProject = restored.find((project) => project.id === restoredActiveProjectId);
+        setActiveChapterId(activeProject?.chapters[0]?.id ?? "");
         setActivePageId("");
-        setExpandedProjects(new Set(restored.map((project) => project.id)));
-        setExpandedChapters(new Set(restored.flatMap((project) => project.chapters.map((chapter) => chapter.id))));
+        setExpandedProjects(restoredActiveProjectId ? new Set([restoredActiveProjectId]) : new Set());
+        setExpandedChapters(new Set(activeProject?.chapters.map((chapter) => chapter.id) ?? []));
         setSavedAt(new Date().toISOString());
         setSaveState("saved");
       } catch (error) {
@@ -516,7 +531,7 @@ export default function WritePage({
     studioMode,
     hasOpenDialogs: projectDialogOpen || projectPickerOpen || findReplaceOpen || jumpOpen || shortcutsOpen || publishOpen || exportOpen || readerPreviewOpen,
     closeDialogs: () => {
-      setProjectDialogOpen(false);
+      if (!projectCreating) setProjectDialogOpen(false);
       setProjectPickerOpen(false);
       setFindReplaceOpen(false);
       setJumpOpen(false);
@@ -529,15 +544,15 @@ export default function WritePage({
     newProject: () => {
       setCreationDraft({
         title: "untitled-story",
+        parentPath: "ShelveStudio",
         formatType: "Book / Novel",
         genre: "Literary Fiction",
         targetWordGoal: "50000",
         starterEnabled: true,
         aiTemplatesEnabled: true,
+        syncOnline: false,
       });
-      void toggleAuxiliaryWindow("new-project").then((opened) => {
-        if (!opened) setProjectDialogOpen((open) => !open);
-      }).catch(() => setProjectDialogOpen((open) => !open));
+      setProjectDialogOpen(true);
     },
     openProjectPicker: () => setProjectPickerOpen((open) => !open),
     toggleExplorer: toggleExplorerSidebar,
@@ -652,6 +667,7 @@ export default function WritePage({
   const createProject = (formatType: WritingFormatType = "Book / Novel") => {
     setCreationDraft({
       title: "untitled-story",
+      parentPath: "ShelveStudio",
       formatType,
       genre: formatType === "Course" || formatType === "Non-Fiction"
         ? "Technical / Education"
@@ -659,10 +675,19 @@ export default function WritePage({
       targetWordGoal: "50000",
       starterEnabled: true,
       aiTemplatesEnabled: true,
+      syncOnline: false,
     });
-    void openAuxiliaryWindow("new-project").then((opened) => {
-      if (!opened) setProjectDialogOpen(true);
-    }).catch(() => setProjectDialogOpen(true));
+    setProjectDialogOpen(true);
+  };
+
+  const chooseProjectLocation = async () => {
+    try {
+      const parentPath = await chooseLocalWritingProjectFolder();
+      if (parentPath) setCreationDraft((current) => ({ ...current, parentPath }));
+    } catch (error) {
+      console.error("Could not choose the local project folder:", error);
+      setStorageError(error instanceof Error ? error.message : t("Could not choose the local project folder."));
+    }
   };
 
   const approveWorkspaceSwitch = async (projectId: string) => {
@@ -675,7 +700,7 @@ export default function WritePage({
     }
   };
 
-  const activateProject = async (project: WritingProject) => {
+  const activateProject = async (project: WritingProject, closeProjectDialog = true) => {
     if (!(await approveWorkspaceSwitch(project.id))) return false;
     const firstProjectPageId = project.pages?.[0]?.id ?? "";
     const firstChapter = project.chapters[0];
@@ -690,27 +715,30 @@ export default function WritePage({
     }
     setWelcomeLeftOpen(false);
     setWelcomeRightOpen(false);
+    window.sessionStorage.setItem(STUDIO_ACTIVE_PROJECT_KEY, project.id);
     setActiveProjectId(project.id);
     setActiveChapterId(firstProjectPageId ? "" : firstChapter?.id ?? "");
     setActivePageId(firstPageId);
     setSelection(null);
     editorRangeRef.current = null;
     editorDocumentIdRef.current = "";
-    setExpandedProjects((current) => new Set(current).add(project.id));
+    setExpandedProjects(new Set([project.id]));
     setExpandedChapters((current) => new Set([...current, ...project.chapters.map((chapter) => chapter.id)]));
     setPreviewMode(false);
     setStudioMode("write");
     setFocusMode(false);
-    setProjectDialogOpen(false);
+    if (closeProjectDialog) setProjectDialogOpen(false);
     setProjectPickerOpen(false);
     return true;
   };
 
-  const addAndOpenProject = async (project: WritingProject) => {
+  const addAndOpenProject = async (project: WritingProject, keepProjectDialogOpen = false) => {
     const openedProject = { ...project, lastOpenedAt: new Date().toISOString() };
-    if (!(await activateProject(openedProject))) return;
+    if (!(await activateProject(openedProject, !keepProjectDialogOpen))) return false;
     const next = [openedProject, ...projectsRef.current.filter((item) => item.id !== openedProject.id)];
-    commitProjects(next, true);
+    const saved = await commitProjects(next, true);
+    if (keepProjectDialogOpen) setProjectDialogOpen(false);
+    return saved ?? true;
   };
 
   const openSavedProject = (projectId: string) => {
@@ -726,6 +754,7 @@ export default function WritePage({
 
   const closeCurrentProject = async () => {
     if (!(await approveWorkspaceSwitch(""))) return;
+    window.sessionStorage.setItem(STUDIO_ACTIVE_PROJECT_KEY, "");
     setActiveProjectId("");
     setActiveChapterId("");
     setActivePageId("");
@@ -853,7 +882,7 @@ export default function WritePage({
         project.pages = [{ ...project.pages[0], content }, ...project.pages.slice(1)];
       }
       project.wordCount = countProjectWords(project);
-      addAndOpenProject(project);
+      await addAndOpenProject(project);
       setFeedback(t("Manuscript imported."));
     } catch (error) {
       console.error("Could not import the manuscript:", error);
@@ -861,28 +890,137 @@ export default function WritePage({
     }
   };
 
-  const confirmCreateProject = () => {
+  const importDroppedManuscripts = async (files: Array<{ name: string; content: string }>) => {
+    const manuscripts = files.filter((file) => /\.(md|txt)$/i.test(file.name));
+    if (!manuscripts.length) {
+      setStorageError(t("Choose a Markdown (.md) or text (.txt) manuscript."));
+      return;
+    }
+
+    if (!activeProject) {
+      for (const manuscript of manuscripts) {
+        await importManuscript(new File([manuscript.content], manuscript.name, { type: "text/plain" }));
+      }
+      return;
+    }
+
+    const currentProject = projectsRef.current.find((project) => project.id === activeProject.id);
+    if (!currentProject) {
+      setStorageError(t("This project is no longer available."));
+      return;
+    }
+    const chapterId = activePageParentChapter?.id ?? (activePage ? null : activeChapter?.id ?? null);
+    const now = new Date().toISOString();
+    const importedPages = manuscripts.map((file) => ({
+      id: crypto.randomUUID(),
+      title: file.name.replace(/\.(md|txt)$/i, ""),
+      content: file.content,
+      kind: "page" as const,
+      category: "writing" as const,
+      updatedAt: now,
+    }));
+
+    if (chapterId) {
+      updateProject(currentProject.id, {
+        chapters: currentProject.chapters.map((chapter) => chapter.id === chapterId
+          ? { ...chapter, pages: [...(chapter.pages ?? []), ...importedPages] }
+          : chapter),
+      });
+      setExpandedChapters((current) => new Set(current).add(chapterId));
+      setActiveChapterId(chapterId);
+    } else {
+      updateProject(currentProject.id, { pages: [...(currentProject.pages ?? []), ...importedPages] });
+      setActiveChapterId("");
+    }
+    setActivePageId(importedPages[importedPages.length - 1].id);
+    setFeedback(t("Imported files into the current project."));
+  };
+  importDroppedManuscriptsRef.current = importDroppedManuscripts;
+
+  const handleExternalFileDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    setFileDropActive(false);
+    const files = Array.from(event.dataTransfer.files).filter((file) => /\.(md|txt)$/i.test(file.name));
+    if (!files.length) {
+      setStorageError(t("Choose a Markdown (.md) or text (.txt) manuscript."));
+      return;
+    }
+    void Promise.all(files.map(async (file) => ({ name: file.name, content: await file.text() })))
+      .then(importDroppedManuscripts)
+      .catch((error: unknown) => {
+        console.error("Could not read dropped manuscript files:", error);
+        setStorageError(error instanceof Error ? error.message : t("Could not import this manuscript."));
+      });
+  };
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow().onDragDropEvent((event) => {
+      if (event.payload.type === "enter") setFileDropActive(true);
+      if (event.payload.type === "leave") setFileDropActive(false);
+      if (event.payload.type !== "drop") return;
+      setFileDropActive(false);
+      const paths = event.payload.paths.filter((filePath) => /\.(md|txt)$/i.test(filePath));
+      if (!paths.length) {
+        setStorageError(t("Choose a Markdown (.md) or text (.txt) manuscript."));
+        return;
+      }
+      void Promise.all(paths.map(async (filePath) => ({
+        name: filePath.split(/[\\/]/).pop() ?? filePath,
+        content: await readTextFile(filePath),
+      }))).then((files) => importDroppedManuscriptsRef.current(files)).catch((error: unknown) => {
+        console.error("Could not read dropped manuscript files:", error);
+        setStorageError(error instanceof Error ? error.message : t("Could not import this manuscript."));
+      });
+    }).then((stopListening) => {
+      if (cancelled) void stopListening();
+      else unlisten = stopListening;
+    }).catch((error: unknown) => {
+      console.error("Could not listen for dropped files:", error);
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [t]);
+
+  const confirmCreateProject = async () => {
+    if (projectCreating) return;
     const target = creationDraft.targetWordGoal.trim() ? Number(creationDraft.targetWordGoal) : null;
     if (target !== null && (!Number.isFinite(target) || target <= 0)) {
       setFeedback(t("Enter a positive word goal, or leave it blank."));
       return;
     }
-    const project = scaffoldWritingProject(
-      newProject(userId, { ...creationDraft, targetWordGoal: target }),
-      creationDraft.formatType,
-      {
-        starterEnabled: creationDraft.starterEnabled,
-        aiTemplatesEnabled: creationDraft.aiTemplatesEnabled,
-      },
-    );
-    project.wordCount = countProjectWords(project);
-    addAndOpenProject(project);
+    setProjectCreating(true);
+    try {
+      const project = scaffoldWritingProject(
+        newProject(userId, { ...creationDraft, targetWordGoal: target }),
+        creationDraft.formatType,
+        {
+          starterEnabled: creationDraft.starterEnabled,
+          aiTemplatesEnabled: creationDraft.aiTemplatesEnabled,
+        },
+      );
+      project.localPath = await createLocalWritingProjectPath(creationDraft.title, creationDraft.parentPath);
+      project.syncOnline = creationDraft.syncOnline;
+      project.wordCount = countProjectWords(project);
+      await addAndOpenProject(project, true);
+    } catch (error) {
+      console.error("Could not create writing project:", error);
+      setStorageError(error instanceof Error ? error.message : t("Could not create this project."));
+    } finally {
+      setProjectCreating(false);
+    }
   };
 
   const removeProject = async (projectId: string) => {
     const next = projectsRef.current.filter((project) => project.id !== projectId);
     if (activeProjectId === projectId && !(await approveWorkspaceSwitch(next[0]?.id ?? ""))) return;
     if (next.length === 0) {
+      window.sessionStorage.setItem(STUDIO_ACTIVE_PROJECT_KEY, "");
       setActiveProjectId("");
       setActiveChapterId("");
       setActivePageId("");
@@ -890,6 +1028,7 @@ export default function WritePage({
       editorRangeRef.current = null;
       editorDocumentIdRef.current = "";
     } else if (activeProjectId === projectId) {
+      window.sessionStorage.setItem(STUDIO_ACTIVE_PROJECT_KEY, next[0].id);
       setActiveProjectId(next[0].id);
       setActiveChapterId(next[0].chapters[0]?.id ?? "");
       setActivePageId("");
@@ -919,9 +1058,11 @@ export default function WritePage({
     if (projectId !== activeProjectId) {
       updateProject(projectId, { lastOpenedAt: new Date().toISOString() });
     }
+    window.sessionStorage.setItem(STUDIO_ACTIVE_PROJECT_KEY, projectId);
     setActiveProjectId(projectId);
     setActiveChapterId(chapterId);
     setActivePageId(pageId);
+    setExpandedProjects(new Set([projectId]));
     setSelection(null);
     editorRangeRef.current = null;
     editorDocumentIdRef.current = "";
@@ -936,7 +1077,6 @@ export default function WritePage({
     const chapter = { ...newChapter(categoryCount + 1, category), ...(title ? { title } : {}) };
     updateProject(projectId, { chapters: [...project.chapters, chapter] });
     selectDocument(projectId, chapter.id);
-    setExpandedProjects((current) => new Set(current).add(projectId));
     setExpandedChapters((current) => new Set(current).add(chapter.id));
   };
 
@@ -964,7 +1104,6 @@ export default function WritePage({
         chapters: project.chapters.map((item) => item.id === chapter.id ? { ...item, pages: [...(item.pages ?? []), page] } : item),
       });
       selectDocument(projectId, chapter.id, page.id);
-      setExpandedProjects((current) => new Set(current).add(projectId));
       setExpandedChapters((current) => new Set(current).add(chapter.id));
       return;
     }
@@ -972,7 +1111,6 @@ export default function WritePage({
     const page = { ...pageDraft, ...(parsedTitle?.title ? { title: parsedTitle.title } : {}), content: content || pageDraft.content };
     updateProject(projectId, { pages: [...(project.pages ?? []), page] });
     selectDocument(projectId, "", page.id);
-    setExpandedProjects((current) => new Set(current).add(projectId));
   };
 
   const defaultFolderTitle = (project: WritingProject, category: WritingExplorerCategory) => {
@@ -1066,7 +1204,6 @@ export default function WritePage({
     const next = [duplicate, ...projectsRef.current];
     commitProjects(next, true);
     selectDocument(duplicate.id, duplicate.chapters[0]?.id ?? "");
-    setExpandedProjects((current) => new Set(current).add(duplicate.id));
     setExpandedChapters((current) => new Set([...current, ...duplicate.chapters.map((chapter) => chapter.id)]));
   };
 
@@ -1198,6 +1335,10 @@ export default function WritePage({
 
   const publishProject = async () => {
     if (!activeProject) return;
+    if (activeProject.localPath && !activeProject.syncOnline) {
+      setStorageError(t("Enable online sync for this project before publishing."));
+      return;
+    }
     if (storageMode !== "cloud" || !token) {
       setStorageError(t("Connect to your Shelve account and switch to Cloud mode to publish."));
       return;
@@ -1835,6 +1976,7 @@ export default function WritePage({
   };
 
   const visibleProjects = useMemo(() => projects.filter((project) => {
+    if (activeProjectId && project.id !== activeProjectId) return false;
     const query = search.trim().toLowerCase();
     const searchableText = [
       project.title,
@@ -1848,13 +1990,10 @@ export default function WritePage({
     ].join(" ").toLowerCase();
     const searchMatches = searchableText.includes(query);
     return searchMatches;
-  }), [projects, search]);
+  }), [activeProjectId, projects, search]);
 
   const toggleProject = (id: string) => setExpandedProjects((current) => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    return next;
+    return current.has(id) ? new Set() : new Set([id]);
   });
   const toggleChapter = (id: string) => setExpandedChapters((current) => {
     const next = new Set(current);
@@ -1880,7 +2019,7 @@ export default function WritePage({
       activeId.itemId !== activeData.itemId || overId?.type !== overData.type || overId.itemId !== overData.itemId) return;
     const targetChapterId = overId.type === "chapter" ? overId.itemId : overData.chapterId;
     if (!targetChapterId) return;
-    setExpandedProjects((current) => current.has(overData.projectId) ? current : new Set(current).add(overData.projectId));
+    setExpandedProjects(new Set([overData.projectId]));
     setExpandedChapters((current) => current.has(targetChapterId) ? current : new Set(current).add(targetChapterId));
   };
   const handleExplorerDragEnd = ({ active, over }: DragEndEvent) => {
@@ -1981,9 +2120,9 @@ export default function WritePage({
     if (!onStudioToolbarChange) return;
     const actions: StudioTitlebarActions = {
       onOpenWritePage: () => setStudioMode("write"),
-      onOpenCoverDesigner: () => openStudioPage("/writings/cover"),
-      onOpenGoalsPage: () => openStudioPage("/writings/goals"),
-      onOpenAnalyticsPage: () => openStudioPage("/writings/analytics"),
+      onOpenCoverDesigner: () => { window.location.hash = "#/writings/cover"; },
+      onOpenGoalsPage: () => { window.location.hash = "#/writings/goals"; },
+      onOpenAnalyticsPage: () => { window.location.hash = "#/writings/analytics"; },
       onNewProject: createProject,
       onOpenProjectPicker: openProjectPicker,
       onSelectRecentProject: openSavedProject,
@@ -2022,7 +2161,24 @@ export default function WritePage({
   });
 
   return (
-    <div className={`page-shell  writing-screen writing-studio mode-${studioMode} ${focusMode ? "is-focus" : ""} ${explorerSidebarOpen ? "" : "left-collapsed"} ${assistantSidebarOpen ? "" : "right-collapsed"}`}>
+    <div
+      className={`page-shell  writing-screen writing-studio mode-${studioMode} ${focusMode ? "is-focus" : ""} ${explorerSidebarOpen ? "" : "left-collapsed"} ${assistantSidebarOpen ? "" : "right-collapsed"} ${fileDropActive ? "is-file-drop-active" : ""}`}
+      onDragEnter={(event) => {
+        if (Array.from(event.dataTransfer.types).includes("Files")) setFileDropActive(true);
+      }}
+      onDragOver={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target || !event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setFileDropActive(false);
+        }
+      }}
+      onDrop={handleExternalFileDrop}
+    >
+      {fileDropActive && <div className="studio-file-drop-overlay" aria-live="polite">{t("Drop Markdown or text files to import")}</div>}
       <input
         ref={manuscriptInputRef}
         className="hidden"
@@ -2203,11 +2359,11 @@ export default function WritePage({
           <footer className="studio-statusbar studio-word-statusbar">
             {editorStatsOpen && <div className="studio-document-stats"><strong>{t("Document statistics")}</strong><span>{activeDocumentWords.toLocaleString(locale)} {t("words")}</span><span>{activeDocumentCharacters.toLocaleString(locale)} {t("characters")}</span><span>{t("About")} {Math.max(1, Math.ceil(activeDocumentWords / 220))} {t("minutes")}</span></div>}
             <div className="studio-statusbar-left">
-              <span>Page 1 of {writingPages.length}</span><i />
+              <span>{t("Page")} 1 {t("of")} {writingPages.length}</span><i />
               <button type="button" onClick={() => setEditorStatsOpen((open) => !open)} aria-expanded={editorStatsOpen}>{activeDocumentWords.toLocaleString(locale)} {t("words")} · {activeDocumentCharacters.toLocaleString(locale)} {t("characters")}</button><i />
               <SyncStatusControl token={token} />
               <i />
-              <span className="studio-status-language">English</span><i className="studio-status-language-separator" />
+              <span className="studio-status-language">{t(language === "ar" ? "Arabic" : language === "fr" ? "French" : language === "de" ? "German" : "English")}</span><i className="studio-status-language-separator" />
               <span className="studio-status-saved"><span className={`studio-save-dot ${saveState}`} />{saveState === "saved" ? t("Saved") : saveLabel}</span>
             </div>
             <div className="studio-statusbar-actions">
@@ -2291,12 +2447,14 @@ export default function WritePage({
       )}
 
       {projectDialogOpen && createPortal(
-        <div className="studio-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProjectDialogOpen(false); }}>
+        <div className="studio-modal-backdrop" role="presentation" onMouseDown={(event) => { if (!projectCreating && event.target === event.currentTarget) setProjectDialogOpen(false); }}>
           <NewProjectWizard
             draft={creationDraft}
             onChange={setCreationDraft}
             onCancel={() => setProjectDialogOpen(false)}
+            onChooseLocation={chooseProjectLocation}
             onCreate={confirmCreateProject}
+            isCreating={projectCreating}
             t={t}
           />
         </div>,

@@ -231,6 +231,9 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  age?: number | null;
+  gender?: string;
+  country?: string;
   createdAt?: string;
   updatedAt?: string;
   plan?: "free" | "standard" | "premium";
@@ -239,6 +242,7 @@ export interface AuthUser {
 export interface AuthSession {
   token: string;
   expiresAt: string;
+  rememberMe?: boolean;
   user: AuthUser;
 }
 
@@ -246,6 +250,7 @@ export type AppView =
   | "overview"
   | "onboarding"
   | "signin"
+  | "reset-password"
   | "signup"
   | "library"
   | "reading"
@@ -258,6 +263,8 @@ export type AppView =
   | "upload"
   | "settings"
   | "profile"
+  | "notifications"
+  | "feedback"
   | "planner"
   | "edit-book"
   | "details"
